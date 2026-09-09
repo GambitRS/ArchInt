@@ -73,6 +73,16 @@ test("sessions, drawing ownership, persistence, validation, and conflicting upda
           fill: "#ffffff",
           stroke: "#7392b8",
           fontSize: 18,
+          rotation: 15,
+          groupId: "stack",
+          locked: false,
+          hidden: false,
+          strokeWidth: 2,
+          fontWeight: 700,
+          lineHeight: 1.4,
+          textAlign: "center",
+          wrap: true,
+          overflow: "hidden",
         },
       ],
     };
@@ -112,6 +122,20 @@ test("sessions, drawing ownership, persistence, validation, and conflicting upda
             elements: [
               { ...doc.elements[0], fill: "url(https://bad.invalid)" },
             ],
+          },
+          cookie,
+        )
+      ).status,
+      400,
+    );
+    assert.equal(
+      (
+        await request(
+          "/api/drawings",
+          "POST",
+          {
+            ...doc,
+            elements: [{ ...doc.elements[0], parentId: "missing-parent" }],
           },
           cookie,
         )

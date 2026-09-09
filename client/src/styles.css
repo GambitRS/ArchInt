@@ -645,6 +645,12 @@ small {
 .editor-toolbar button {
   font-size: 11px;
 }
+.editor-actions {
+  gap: 5px;
+}
+.editor-actions button {
+  padding: 6px 7px;
+}
 .document-tag {
   border: 1px solid #dfe5d8;
   background: #f6f8f1;
@@ -799,7 +805,8 @@ kbd {
   color: #718364;
 }
 .properties input:not([type="color"]):not([type="checkbox"]),
-.properties textarea {
+.properties textarea,
+.properties select {
   display: block;
   width: 100%;
   margin-top: 8px;
@@ -889,6 +896,33 @@ kbd {
   text-overflow: ellipsis;
   color: #6a7e5e;
 }
+.layer-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: 4px;
+}
+.layer-row.active {
+  background: #edf5e8;
+}
+.layer-row.hidden {
+  opacity: 0.6;
+}
+.layer-select {
+  flex: 1;
+  min-width: 0;
+}
+.layer-select > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.layer-icon {
+  flex: 0 0 27px;
+  width: 27px !important;
+  padding: 7px 2px !important;
+  color: #82927b !important;
+  font-size: 11px !important;
+}
 .layer-list button > span {
   font-size: 13px;
 }
@@ -931,6 +965,31 @@ kbd {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0 10px;
+}
+.button-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 12px;
+}
+.button-grid.compact {
+  gap: 4px;
+}
+.button-grid .secondary {
+  margin-top: 0;
+  min-width: 0;
+  padding: 7px 5px;
+  font-size: 10px;
+}
+.selection-actions p {
+  color: #748669;
+  font-size: 10px;
+  line-height: 1.6;
+  margin: 18px 0 0;
+}
+.arrange-section {
+  margin-top: 18px;
+  padding-top: 17px;
 }
 .delete {
   font-size: 11px;

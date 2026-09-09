@@ -9,11 +9,35 @@ import { CreateDrawingDialog } from "./library/CreateDrawingDialog";
 import { DrawingLibrary } from "./library/DrawingLibrary";
 import type { SaveIssue, Screen, Template, User } from "./app/types";
 import {
+  boundsForElements,
+  eraseAtPoint,
+  elementBounds,
+  intersects,
+  isResizeHandle,
+  rotateElement,
+  resizeElement,
+  snapTranslation,
+  translateElement,
+  type Bounds,
+  type ResizeHandle,
+  type SnapGuide,
+} from "./editor/geometry";
+import {
   makeExample,
   type Drawing,
   type Element,
   type Kind,
 } from "./diagram";
+type Tool = Kind | "select" | "eraser";
+type Alignment =
+  | "left"
+  | "center-x"
+  | "right"
+  | "top"
+  | "center-y"
+  | "bottom";
+type Distribution = "horizontal" | "vertical";
+
 export default function App() {
   const [screen, setScreen] = useState<Screen>("login");
   const [user, setUser] = useState<User | null>(null);
@@ -28,8 +52,8 @@ export default function App() {
   const [reauthError, setReauthError] = useState("");
   const [drawings, setDrawings] = useState<Drawing[]>([]);
   const [current, setCurrent] = useState("");
-  const [selected, setSelected] = useState<string | null>(null);
-  const [tool, setTool] = useState<Kind | "select">("select");
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [tool, setTool] = useState<Tool>("select");
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("All drawings");
   const [zoom, setZoom] = useState(65);
@@ -40,12 +64,50 @@ export default function App() {
   const [modal, setModal] = useState(false);
   const [newName, setNewName] = useState("Untitled drawing");
   const [template, setTemplate] = useState<Template>("blank");
+  const [guides, setGuides] = useState<SnapGuide[]>([]);
+  const [selectionBox, setSelectionBox] = useState<Bounds | null>(null);
   const svg = useRef<SVGSVGElement>(null);
   const drag = useRef<{
     id: string;
     x: number;
     y: number;
     original: Element[];
+    ids?: string[];
+    bounds?: Bounds | null;
+  } | null>(null);
+  const resize = useRef<{
+    id: string;
+    handle: ResizeHandle;
+    x: number;
+    y: number;
+    original: Element[];
+    preserveAspect: boolean;
+  } | null>(null);
+  const rotate = useRef<{
+    id: string;
+    centerX: number;
+    centerY: number;
+    startAngle: number;
+    original: Element[];
+  } | null>(null);
+  const marquee = useRef<{
+    x: number;
+    y: number;
+    additive: boolean;
+    originalIds: string[];
+  } | null>(null);
+  const eraser = useRef<{ original: Element[] } | null>(null);
+  const editBaseline = useRef<{ drawingId: string; elements: Element[] } | null>(
+    null,
+  );
+  const copyBuffer = useRef<Element[]>([]);
+  const spacePressed = useRef(false);
+  const pan = useRef<{
+    x: number;
+    y: number;
+    scrollLeft: number;
+    scrollTop: number;
+    scroll: HTMLElement;
   } | null>(null);
   const pending = useRef(new Map<string, Drawing>());
   const revisions = useRef(new Map<string, number>());
@@ -54,7 +116,10 @@ export default function App() {
   const createRequest = useRef<Promise<void> | null>(null);
   const createIdempotencyKey = useRef<string | null>(null);
   const drawing = drawings.find((d) => d.id === current);
-  const element = drawing?.elements.find((e) => e.id === selected);
+  const element =
+    selectedIds.length === 1
+      ? drawing?.elements.find((e) => e.id === selectedIds[0])
+      : undefined;
   async function loadWorkspace(
     u: User,
     target: Screen = "library",
@@ -180,7 +245,14 @@ export default function App() {
   }
   useEffect(() => {
     const unload = (e: BeforeUnloadEvent) => {
-      if (pending.current.size || drag.current) {
+      if (
+        pending.current.size ||
+        drag.current ||
+        resize.current ||
+        rotate.current ||
+        marquee.current ||
+        eraser.current
+      ) {
         e.preventDefault();
         e.returnValue = "";
       }
@@ -195,6 +267,97 @@ export default function App() {
     window.addEventListener("online", retryPendingSave);
     return () => window.removeEventListener("online", retryPendingSave);
   }, []);
+  function groupMembers(elements: Element[], id: string): string[] {
+    const element = elements.find((candidate) => candidate.id === id);
+    return element?.groupId
+      ? elements
+          .filter((candidate) => candidate.groupId === element.groupId)
+          .map((candidate) => candidate.id)
+      : [id];
+  }
+  function moveIdsForSelection(elements: Element[], ids: string[]): string[] {
+    const result = new Set(ids);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const candidate of elements) {
+        const groupSelected =
+          candidate.groupId &&
+          [...result].some(
+            (id) => elements.find((element) => element.id === id)?.groupId === candidate.groupId,
+          );
+        const parentSelected = candidate.parentId && result.has(candidate.parentId);
+        if ((groupSelected || parentSelected) && !result.has(candidate.id)) {
+          result.add(candidate.id);
+          changed = true;
+        }
+      }
+    }
+    return [...result];
+  }
+  function selectionUnits(elements: Element[], ids: string[]): string[][] {
+    const selectedSet = new Set(ids);
+    const assigned = new Set<string>();
+    const units: string[][] = [];
+    for (const id of ids) {
+      if (assigned.has(id)) continue;
+      const candidate = elements.find((element) => element.id === id);
+      if (!candidate) continue;
+      let parent = candidate.parentId;
+      let hasSelectedParent = false;
+      const visited = new Set<string>();
+      while (parent && !visited.has(parent)) {
+        if (selectedSet.has(parent)) {
+          hasSelectedParent = true;
+          break;
+        }
+        visited.add(parent);
+        parent = elements.find((element) => element.id === parent)?.parentId;
+      }
+      if (hasSelectedParent) continue;
+      const unit = moveIdsForSelection(elements, [id]);
+      units.push(unit);
+      unit.forEach((unitId) => assigned.add(unitId));
+    }
+    return units;
+  }
+  function hasLockedAncestor(elements: Element[], id: string): boolean {
+    let candidate = elements.find((element) => element.id === id);
+    const visited = new Set<string>();
+    while (candidate && !visited.has(candidate.id)) {
+      if (candidate.locked) return true;
+      visited.add(candidate.id);
+      candidate = candidate.parentId
+        ? elements.find((element) => element.id === candidate!.parentId)
+        : undefined;
+    }
+    return false;
+  }
+  function canMove(elements: Element[], ids: string[]): boolean {
+    return ids.every((id) => !hasLockedAncestor(elements, id));
+  }
+  function selectTarget(id: string | null, additive = false) {
+    if (!id || !drawing) {
+      if (!additive) setSelectedIds([]);
+      return;
+    }
+    const targetIds = groupMembers(drawing.elements, id);
+    setSelectedIds((currentIds) => {
+      if (!additive) return targetIds;
+      const next = new Set(currentIds);
+      for (const targetId of targetIds) {
+        if (next.has(targetId)) next.delete(targetId);
+        else next.add(targetId);
+      }
+      return [...next];
+    });
+  }
+  function beginTextEdit(id: string) {
+    selectTarget(id, false);
+    requestAnimationFrame(() => {
+      document.querySelector<HTMLTextAreaElement>("[data-primary-label]")?.focus();
+    });
+  }
   function replace(elements: Element[], remember = true) {
     if (!drawing) return;
     if (remember) {
@@ -203,34 +366,262 @@ export default function App() {
     }
     commit({ ...drawing, elements, updated: new Date().toISOString() });
   }
-  const update = (patch: Partial<Element>) =>
+  function update(patch: Partial<Element>, remember = true) {
+    if (!drawing || selectedIds.length !== 1 || !element) return;
+    if (hasLockedAncestor(drawing.elements, element.id)) return;
+    if (!remember && !editBaseline.current) {
+      editBaseline.current = {
+        drawingId: drawing.id,
+        elements: structuredClone(drawing.elements),
+      };
+    }
     replace(
-      drawing!.elements.map((e) =>
-        e.id === selected ? { ...e, ...patch } : e,
+      drawing.elements.map((candidate) =>
+        candidate.id === element.id ? { ...candidate, ...patch } : candidate,
       ),
+      remember,
     );
+  }
+  function finishTextEdit() {
+    const baseline = editBaseline.current;
+    if (!baseline || baseline.drawingId !== current) return;
+    setHistory((historyState) => [...historyState.slice(-49), baseline.elements]);
+    setFuture([]);
+    editBaseline.current = null;
+  }
   const undo = () => {
-    if (!drawing || !history.length) return;
+    if (!drawing) return;
+    const pendingText =
+      editBaseline.current?.drawingId === drawing.id ? editBaseline.current : null;
+    if (pendingText) {
+      setFuture((f) => [...f, drawing.elements]);
+      replace(pendingText.elements, false);
+      editBaseline.current = null;
+      setSelectedIds([]);
+      return;
+    }
+    if (!history.length) return;
     setFuture((f) => [...f, drawing.elements]);
     replace(history[history.length - 1], false);
     setHistory((h) => h.slice(0, -1));
-    setSelected(null);
+    setSelectedIds([]);
   };
   const redo = () => {
     if (!drawing || !future.length) return;
+    finishTextEdit();
     setHistory((h) => [...h, drawing.elements]);
     replace(future[future.length - 1], false);
     setFuture((f) => f.slice(0, -1));
   };
   const remove = () => {
-    replace(drawing!.elements.filter((e) => e.id !== selected));
-    setSelected(null);
+    if (!drawing || !selectedIds.length) return;
+    const ids = moveIdsForSelection(drawing.elements, selectedIds);
+    if (!canMove(drawing.elements, ids)) return;
+    replace(drawing.elements.filter((candidate) => !ids.includes(candidate.id)));
+    setSelectedIds([]);
   };
+  function groupSelection() {
+    if (!drawing || selectedIds.length < 2) return;
+    const ids = new Set(selectedIds);
+    const groupId = `group-${crypto.randomUUID()}`;
+    replace(
+      drawing.elements.map((candidate) =>
+        ids.has(candidate.id) ? { ...candidate, groupId } : candidate,
+      ),
+    );
+  }
+  function ungroupSelection() {
+    if (!drawing || !selectedIds.length) return;
+    const groupIds = new Set(
+      selectedIds
+        .map((id) => drawing.elements.find((candidate) => candidate.id === id)?.groupId)
+        .filter((id): id is string => Boolean(id)),
+    );
+    if (!groupIds.size) return;
+    replace(
+      drawing.elements.map((candidate) =>
+        candidate.groupId && groupIds.has(candidate.groupId)
+          ? { ...candidate, groupId: undefined }
+          : candidate,
+      ),
+    );
+  }
+  function toggleLock() {
+    if (!drawing || !selectedIds.length) return;
+    const ids = new Set(moveIdsForSelection(drawing.elements, selectedIds));
+    const shouldLock = [...ids].some(
+      (id) => !drawing.elements.find((candidate) => candidate.id === id)?.locked,
+    );
+    replace(
+      drawing.elements.map((candidate) =>
+        ids.has(candidate.id) ? { ...candidate, locked: shouldLock } : candidate,
+      ),
+    );
+  }
+  function toggleVisibility() {
+    if (!drawing || !selectedIds.length) return;
+    const ids = new Set(moveIdsForSelection(drawing.elements, selectedIds));
+    const shouldHide = [...ids].some(
+      (id) => !drawing.elements.find((candidate) => candidate.id === id)?.hidden,
+    );
+    replace(
+      drawing.elements.map((candidate) =>
+        ids.has(candidate.id) ? { ...candidate, hidden: shouldHide } : candidate,
+      ),
+    );
+  }
+  function toggleLockFor(id: string) {
+    if (!drawing) return;
+    const target = drawing.elements.find((candidate) => candidate.id === id);
+    if (!target) return;
+    const ids = new Set(moveIdsForSelection(drawing.elements, [id]));
+    replace(
+      drawing.elements.map((candidate) =>
+        ids.has(candidate.id) ? { ...candidate, locked: !target.locked } : candidate,
+      ),
+    );
+  }
+  function toggleVisibilityFor(id: string) {
+    if (!drawing) return;
+    const target = drawing.elements.find((candidate) => candidate.id === id);
+    if (!target) return;
+    const ids = new Set(moveIdsForSelection(drawing.elements, [id]));
+    replace(
+      drawing.elements.map((candidate) =>
+        ids.has(candidate.id) ? { ...candidate, hidden: !target.hidden } : candidate,
+      ),
+    );
+  }
+  function copySelection() {
+    if (!drawing || !selectedIds.length) return;
+    const ids = moveIdsForSelection(drawing.elements, selectedIds);
+    copyBuffer.current = structuredClone(
+      drawing.elements.filter((candidate) => ids.includes(candidate.id)),
+    );
+  }
+  function pasteSelection() {
+    if (!drawing || !copyBuffer.current.length) return;
+    const source = copyBuffer.current;
+    const idMap = new Map(source.map((candidate) => [candidate.id, crypto.randomUUID()]));
+    const groupMap = new Map(
+      [...new Set(source.map((candidate) => candidate.groupId).filter(Boolean))].map(
+        (groupId) => [groupId, `group-${crypto.randomUUID()}`],
+      ),
+    );
+    const pasted = source.map((candidate) => ({
+      ...structuredClone(candidate),
+      id: idMap.get(candidate.id)!,
+      x: candidate.x + 24,
+      y: candidate.y + 24,
+      groupId: candidate.groupId ? groupMap.get(candidate.groupId) : undefined,
+      parentId: candidate.parentId ? idMap.get(candidate.parentId) : undefined,
+      locked: false,
+      hidden: false,
+    }));
+    replace([...drawing.elements, ...pasted]);
+    setSelectedIds(pasted.map((candidate) => candidate.id));
+  }
+  function reorderSelection(direction: "front" | "back" | "forward" | "backward") {
+    if (!drawing || !selectedIds.length) return;
+    const ids = new Set(moveIdsForSelection(drawing.elements, selectedIds));
+    let next = [...drawing.elements];
+    if (direction === "front") {
+      next = [...next.filter((candidate) => !ids.has(candidate.id)), ...next.filter((candidate) => ids.has(candidate.id))];
+    } else if (direction === "back") {
+      next = [...next.filter((candidate) => ids.has(candidate.id)), ...next.filter((candidate) => !ids.has(candidate.id))];
+    } else if (direction === "forward") {
+      for (let i = next.length - 2; i >= 0; i--) {
+        if (ids.has(next[i].id) && !ids.has(next[i + 1].id)) {
+          [next[i], next[i + 1]] = [next[i + 1], next[i]];
+        }
+      }
+    } else {
+      for (let i = 1; i < next.length; i++) {
+        if (ids.has(next[i].id) && !ids.has(next[i - 1].id)) {
+          [next[i], next[i - 1]] = [next[i - 1], next[i]];
+        }
+      }
+    }
+    replace(next);
+  }
+  function alignSelection(alignment: Alignment) {
+    if (!drawing || selectedIds.length < 2) return;
+    const units = selectionUnits(drawing.elements, selectedIds);
+    const ids = units.flat();
+    if (!canMove(drawing.elements, ids)) return;
+    const target = boundsForElements(drawing.elements, ids);
+    if (!target) return;
+    replace(
+      drawing.elements.map((candidate) => {
+        const unit = units.find((unitIds) => unitIds.includes(candidate.id));
+        if (!unit) return candidate;
+        const bounds = boundsForElements(drawing.elements, unit);
+        if (!bounds) return candidate;
+        const delta =
+          alignment === "left"
+            ? target.x - bounds.x
+            : alignment === "center-x"
+              ? target.x + target.w / 2 - (bounds.x + bounds.w / 2)
+              : alignment === "right"
+                ? target.x + target.w - (bounds.x + bounds.w)
+                : alignment === "top"
+                  ? target.y - bounds.y
+                  : alignment === "center-y"
+                    ? target.y + target.h / 2 - (bounds.y + bounds.h / 2)
+                    : target.y + target.h - (bounds.y + bounds.h);
+        const vertical = alignment === "top" || alignment === "center-y" || alignment === "bottom";
+        return {
+          ...candidate,
+          x: candidate.x + (vertical ? 0 : delta),
+          y: candidate.y + (vertical ? delta : 0),
+        };
+      }),
+    );
+  }
+  function distributeSelection(distribution: Distribution) {
+    if (!drawing || selectedIds.length < 3) return;
+    const units = selectionUnits(drawing.elements, selectedIds);
+    const ids = units.flat();
+    if (!canMove(drawing.elements, ids)) return;
+    const sorted = units
+      .map((unitIds) => ({ unitIds, bounds: boundsForElements(drawing.elements, unitIds) }))
+      .filter((unit): unit is { unitIds: string[]; bounds: Bounds } => Boolean(unit.bounds))
+      .sort((a, b) =>
+        distribution === "horizontal"
+          ? a.bounds.x - b.bounds.x
+          : a.bounds.y - b.bounds.y,
+      );
+    const first = sorted[0]?.bounds;
+    const last = sorted[sorted.length - 1]?.bounds;
+    if (!first || !last) return;
+    const start = distribution === "horizontal" ? first.x : first.y;
+    const end = distribution === "horizontal" ? last.x : last.y;
+    const step = (end - start) / (sorted.length - 1);
+    const positions = new Map(
+      sorted.map(({ unitIds }, index) => [
+        unitIds,
+        start + step * index,
+      ]),
+    );
+    replace(
+      drawing.elements.map((candidate) => {
+        const unit = sorted.find(({ unitIds }) => unitIds.includes(candidate.id));
+        const position = unit ? positions.get(unit.unitIds) : undefined;
+        if (position === undefined) return candidate;
+        const bounds = unit?.bounds;
+        if (!bounds) return candidate;
+        return distribution === "horizontal"
+          ? { ...candidate, x: candidate.x + position - bounds.x }
+          : { ...candidate, y: candidate.y + position - bounds.y };
+      }),
+    );
+  }
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       if (
         screen !== "editor" ||
         modal ||
+        reauthOpen ||
         (e.target instanceof HTMLElement &&
           /INPUT|TEXTAREA|SELECT/.test(e.target.tagName))
       )
@@ -238,29 +629,86 @@ export default function App() {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
         e.preventDefault();
         e.shiftKey ? redo() : undo();
-      } else if (e.key === "Delete" && selected) remove();
-      else if (e.key === "Escape") {
-        setSelected(null);
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") {
+        e.preventDefault();
+        copySelection();
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") {
+        e.preventDefault();
+        pasteSelection();
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "g") {
+        e.preventDefault();
+        e.shiftKey ? ungroupSelection() : groupSelection();
+      } else if (e.key === "Delete" && selectedIds.length) {
+        remove();
+      } else if (
+        selectedIds.length &&
+        drawing &&
+        ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)
+      ) {
+        e.preventDefault();
+        const step = e.shiftKey ? 10 : 1;
+        const delta = {
+          ArrowLeft: [-step, 0],
+          ArrowRight: [step, 0],
+          ArrowUp: [0, -step],
+          ArrowDown: [0, step],
+        }[e.key];
+        if (delta) {
+          const ids = moveIdsForSelection(drawing.elements, selectedIds);
+          if (!canMove(drawing.elements, ids)) return;
+          replace(
+            drawing.elements.map((n) =>
+              ids.includes(n.id)
+                ? translateElement(n, delta[0], delta[1])
+                : n,
+            ),
+          );
+        }
+      } else if (e.key === "Escape") {
+        setSelectedIds([]);
         setTool("select");
       } else if (!e.ctrlKey && !e.metaKey) {
-        const shortcuts: Record<string, Kind | "select"> = {
+        const shortcuts: Record<string, Tool> = {
           v: "select",
           r: "card",
           t: "text",
           o: "ellipse",
           a: "arrow",
           p: "pen",
+          e: "eraser",
         };
-        if (shortcuts[e.key]) setTool(shortcuts[e.key]);
+        if (shortcuts[e.key.toLowerCase()]) setTool(shortcuts[e.key.toLowerCase()]);
       }
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
   });
+  useEffect(() => {
+    const keyDown = (e: KeyboardEvent) => {
+      if (e.code === "Space" && screen === "editor") {
+        spacePressed.current = true;
+        if (!(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement)) {
+          e.preventDefault();
+        }
+      }
+    };
+    const keyUp = (e: KeyboardEvent) => {
+      if (e.code === "Space") spacePressed.current = false;
+    };
+    window.addEventListener("keydown", keyDown);
+    window.addEventListener("keyup", keyUp);
+    return () => {
+      window.removeEventListener("keydown", keyDown);
+      window.removeEventListener("keyup", keyUp);
+    };
+  }, [screen]);
   function open(d: Drawing) {
     setCurrent(d.id);
     setScreen("editor");
-    setSelected(null);
+    editBaseline.current = null;
+    setSelectedIds([]);
+    setGuides([]);
+    setSelectionBox(null);
     setHistory([]);
     setFuture([]);
     setTool("select");
@@ -324,8 +772,11 @@ export default function App() {
   }
   async function goToLibrary() {
     if (screen === "editor" && !(await flush())) return;
+    editBaseline.current = null;
     setScreen("library");
-    setSelected(null);
+    setSelectedIds([]);
+    setGuides([]);
+    setSelectionBox(null);
     setTool("select");
     setSaveIssue(null);
   }
@@ -350,7 +801,10 @@ export default function App() {
       setDrawings((ds) => ds.map((d) => (d.id === id ? saved : d)));
       setHistory([]);
       setFuture([]);
-      setSelected(null);
+      editBaseline.current = null;
+      setSelectedIds([]);
+      setGuides([]);
+      setSelectionBox(null);
       setSaveIssue(null);
       setStatus("All changes saved");
     } catch (e) {
@@ -400,7 +854,8 @@ export default function App() {
       setDrawings([]);
       setScreen("login");
       setCurrent("");
-      setSelected(null);
+      setSelectedIds([]);
+      editBaseline.current = null;
       setSaveIssue(null);
       setReauthOpen(false);
       pending.current.clear();
@@ -415,20 +870,131 @@ export default function App() {
     );
     return { x: p.x, y: p.y };
   }
+  function pointerBounds(
+    start: { x: number; y: number },
+    end: { x: number; y: number },
+  ): Bounds {
+    return {
+      x: Math.min(start.x, end.x),
+      y: Math.min(start.y, end.y),
+      w: Math.abs(end.x - start.x),
+      h: Math.abs(end.y - start.y),
+    };
+  }
   function down(e: PointerEvent<SVGSVGElement>) {
     if (e.button !== 0 || !drawing) return;
+    if (spacePressed.current) {
+      const scroll = e.currentTarget.closest<HTMLElement>(".canvas-scroll");
+      if (scroll) {
+        pan.current = {
+          x: e.clientX,
+          y: e.clientY,
+          scrollLeft: scroll.scrollLeft,
+          scrollTop: scroll.scrollTop,
+          scroll,
+        };
+        e.currentTarget.setPointerCapture(e.pointerId);
+      }
+      return;
+    }
     const p = point(e);
-    const target = (e.target as SVGElement)
-      .closest("[data-element]")
-      ?.getAttribute("data-element");
+    const svgTarget = e.target as SVGElement;
+    const handleValue = (e.target as SVGElement)
+      .closest("[data-resize-handle]")
+      ?.getAttribute("data-resize-handle");
+    const handle = isResizeHandle(handleValue) ? handleValue : null;
+    const rotateTarget = svgTarget
+      .closest("[data-rotate-handle]")
+      ?.getAttribute("data-rotate-handle");
+    const target = svgTarget.closest("[data-element]")?.getAttribute("data-element");
+    const additive = e.shiftKey || e.metaKey || e.ctrlKey;
+    finishTextEdit();
+    setGuides([]);
+    setSelectionBox(null);
+    if (tool === "eraser") {
+      eraser.current = { original: structuredClone(drawing.elements) };
+      e.currentTarget.setPointerCapture(e.pointerId);
+      const erased = eraseAtPoint(drawing.elements, p.x, p.y);
+      if (erased.length !== drawing.elements.length) {
+        setDrawings((ds) =>
+          ds.map((candidate) =>
+            candidate.id === current ? { ...candidate, elements: erased } : candidate,
+          ),
+        );
+      }
+      return;
+    }
     if (tool === "select") {
-      setSelected(target || null);
+      const base = target && drawing.elements.find((n) => n.id === target);
+      if (
+        rotateTarget &&
+        base &&
+        !["arrow", "pen"].includes(base.kind) &&
+        !hasLockedAncestor(drawing.elements, base.id)
+      ) {
+        rotate.current = {
+          id: base.id,
+          centerX: base.x + base.w / 2,
+          centerY: base.y + base.h / 2,
+          startAngle: Math.atan2(p.y - (base.y + base.h / 2), p.x - (base.x + base.w / 2)),
+          original: structuredClone(drawing.elements),
+        };
+        setSelectedIds([base.id]);
+        e.currentTarget.setPointerCapture(e.pointerId);
+        return;
+      }
+      if (
+        handle &&
+        base &&
+        !["arrow", "pen"].includes(base.kind) &&
+        !hasLockedAncestor(drawing.elements, base.id)
+      ) {
+        setSelectedIds([base.id]);
+        resize.current = {
+          id: base.id,
+          handle,
+          x: p.x,
+          y: p.y,
+          original: structuredClone(drawing.elements),
+          preserveAspect: e.shiftKey,
+        };
+        e.currentTarget.setPointerCapture(e.pointerId);
+        return;
+      }
       if (target) {
+        const targetIds = groupMembers(drawing.elements, target);
+        const wasSelected = selectedIds.includes(target);
+        const intendedSelection = additive
+          ? (() => {
+              const next = new Set(selectedIds);
+              for (const id of targetIds) {
+                if (next.has(id)) next.delete(id);
+                else next.add(id);
+              }
+              return [...next];
+            })()
+          : targetIds;
+        setSelectedIds(intendedSelection);
+        if (additive && wasSelected) return;
+        const ids = moveIdsForSelection(drawing.elements, intendedSelection);
+        if (!canMove(drawing.elements, ids)) return;
         drag.current = {
           id: target,
           ...p,
           original: structuredClone(drawing.elements),
+          ids,
+          bounds: boundsForElements(drawing.elements, ids),
         };
+        e.currentTarget.setPointerCapture(e.pointerId);
+      } else {
+        if (!additive) setSelectedIds([]);
+        marquee.current = {
+          x: p.x,
+          y: p.y,
+          additive,
+          originalIds: selectedIds,
+        };
+        setSelectionBox({ x: p.x, y: p.y, w: 0, h: 0 });
         e.currentTarget.setPointerCapture(e.pointerId);
       }
       return;
@@ -461,40 +1027,183 @@ export default function App() {
       fill: tool === "container" ? "#f1f5f2" : "#eef3ff",
       stroke: "#7392b8",
       fontSize: 18,
+      rotation: 0,
+      strokeWidth: tool === "pen" ? 3 : tool === "arrow" ? 2.5 : 1.5,
+      fontWeight: tool === "text" ? 400 : 600,
+      lineHeight: 1.35,
+      textAlign: "left",
+      wrap: true,
+      overflow: tool === "text" ? "visible" : "hidden",
       points: tool === "pen" ? [[0, 0]] : undefined,
+      parentId:
+        tool === "card" || tool === "text" || tool === "ellipse" || tool === "icon"
+          ? [...drawing.elements]
+              .reverse()
+              .find(
+                (candidate) =>
+                  candidate.kind === "container" &&
+                  !candidate.hidden &&
+                  p.x >= candidate.x &&
+                  p.x <= candidate.x + candidate.w &&
+                  p.y >= candidate.y &&
+                  p.y <= candidate.y + candidate.h,
+              )?.id
+          : undefined,
     };
     replace([...drawing.elements, n]);
-    setSelected(n.id);
+    setSelectedIds([n.id]);
     if (tool === "pen" || tool === "arrow") {
-      drag.current = { id: n.id, ...p, original: [...drawing.elements, n] };
+      drag.current = {
+        id: n.id,
+        ...p,
+        original: [...drawing.elements, n],
+        ids: [n.id],
+        bounds: boundsForElements([...drawing.elements, n], [n.id]),
+      };
       e.currentTarget.setPointerCapture(e.pointerId);
     } else setTool("select");
   }
   function move(e: PointerEvent<SVGSVGElement>) {
-    if (!drag.current || !drawing) return;
-    const p = point(e),
-      d = drag.current,
-      base = d.original.find((n) => n.id === d.id)!;
-    const elements = drawing.elements.map((n) =>
-      n.id !== d.id
-        ? n
-        : tool === "pen"
-          ? {
-              ...n,
-              points: [
-                ...(n.points || []),
-                [p.x - base.x, p.y - base.y] as [number, number],
-              ],
-            }
-          : tool === "arrow"
-            ? { ...n, w: p.x - base.x, h: p.y - base.y }
-            : { ...n, x: base.x + p.x - d.x, y: base.y + p.y - d.y },
-    );
+    if (!drawing) return;
+    if (pan.current) {
+      pan.current.scroll.scrollLeft = pan.current.scrollLeft - (e.clientX - pan.current.x);
+      pan.current.scroll.scrollTop = pan.current.scrollTop - (e.clientY - pan.current.y);
+      return;
+    }
+    const p = point(e);
+    if (eraser.current) {
+      const erased = eraseAtPoint(drawing.elements, p.x, p.y);
+      setDrawings((ds) =>
+        ds.map((candidate) =>
+          candidate.id === current ? { ...candidate, elements: erased } : candidate,
+        ),
+      );
+      return;
+    }
+    if (marquee.current) {
+      setSelectionBox(pointerBounds(marquee.current, p));
+      return;
+    }
+    if (rotate.current) {
+      const r = rotate.current;
+      const base = r.original.find((n) => n.id === r.id);
+      if (!base) return;
+      let degrees =
+        ((Math.atan2(p.y - r.centerY, p.x - r.centerX) - r.startAngle) * 180) /
+        Math.PI;
+      if (e.shiftKey) {
+        degrees = Math.round(degrees / 15) * 15;
+      }
+      const elements = drawing.elements.map((n) =>
+        n.id === r.id ? rotateElement(base, degrees) : n,
+      );
+      setDrawings((ds) =>
+        ds.map((candidate) =>
+          candidate.id === current ? { ...candidate, elements } : candidate,
+        ),
+      );
+      return;
+    }
+    if (resize.current) {
+      const r = resize.current;
+      const base = r.original.find((n) => n.id === r.id);
+      if (!base) return;
+      const elements = drawing.elements.map((n) =>
+        n.id === r.id
+          ? resizeElement(
+              base,
+              r.handle,
+              p.x - r.x,
+              p.y - r.y,
+              24,
+              e.shiftKey || r.preserveAspect,
+            )
+          : n,
+      );
+      setDrawings((ds) =>
+        ds.map((n) => (n.id === current ? { ...n, elements } : n)),
+      );
+      return;
+    }
+    if (!drag.current) return;
+    const d = drag.current;
+    const base = d.original.find((n) => n.id === d.id)!;
+    let nextX = p.x - d.x;
+    let nextY = p.y - d.y;
+    if (tool === "select") {
+      const snapped = snapTranslation(d.original, d.ids || [d.id], nextX, nextY);
+      nextX = snapped.deltaX;
+      nextY = snapped.deltaY;
+      setGuides(snapped.guides);
+    }
+    const originalById = new Map(d.original.map((candidate) => [candidate.id, candidate]));
+    const movingIds = d.ids || [d.id];
+    const elements = drawing.elements.map((n) => {
+      const original = originalById.get(n.id);
+      if (!original || !movingIds.includes(n.id)) return n;
+      if (tool === "pen") {
+        return {
+          ...n,
+          points: [
+            ...(n.points || []),
+            [p.x - base.x, p.y - base.y] as [number, number],
+          ],
+        };
+      }
+      if (tool === "arrow") return { ...n, w: p.x - base.x, h: p.y - base.y };
+      return translateElement(original, nextX, nextY);
+    });
     setDrawings((ds) =>
       ds.map((n) => (n.id === current ? { ...n, elements } : n)),
     );
   }
-  function up() {
+  function up(e?: PointerEvent<SVGSVGElement>) {
+    if (pan.current) {
+      pan.current = null;
+      return;
+    }
+    if (eraser.current && drawing) {
+      if (eraser.current.original.length !== drawing.elements.length) {
+        setHistory((h) => [...h.slice(-49), eraser.current!.original]);
+        setFuture([]);
+        commit({ ...drawing, updated: new Date().toISOString() });
+      }
+      eraser.current = null;
+      setTool("select");
+      return;
+    }
+    if (marquee.current && drawing) {
+      const start = marquee.current;
+      const end = e ? point(e) : start;
+      const box = pointerBounds(start, end);
+      const picked = drawing.elements
+        .filter((candidate) => !candidate.hidden && !candidate.locked)
+        .filter((candidate) => intersects(elementBounds(candidate), box))
+        .flatMap((candidate) => groupMembers(drawing.elements, candidate.id));
+      const next = start.additive
+        ? [...new Set([...start.originalIds, ...picked])]
+        : [...new Set(picked)];
+      setSelectedIds(next);
+      marquee.current = null;
+      setSelectionBox(null);
+      return;
+    }
+    if (rotate.current && drawing) {
+      setHistory((h) => [...h.slice(-49), rotate.current!.original]);
+      setFuture([]);
+      commit({ ...drawing, updated: new Date().toISOString() });
+      rotate.current = null;
+      setTool("select");
+      return;
+    }
+    if (resize.current && drawing) {
+      setHistory((h) => [...h.slice(-49), resize.current!.original]);
+      setFuture([]);
+      commit({ ...drawing, updated: new Date().toISOString() });
+      resize.current = null;
+      setTool("select");
+      return;
+    }
     if (!drag.current || !drawing) return;
     if (tool === "select") {
       setHistory((h) => [...h.slice(-49), drag.current!.original]);
@@ -502,6 +1211,7 @@ export default function App() {
     }
     commit({ ...drawing, updated: new Date().toISOString() });
     drag.current = null;
+    setGuides([]);
     setTool("select");
   }
   function fitZoom() {
@@ -511,22 +1221,20 @@ export default function App() {
     );
   }
   function duplicate() {
-    if (!drawing || !element) return;
-    const copy = {
-      ...element,
-      id: crypto.randomUUID(),
-      x: element.x + 24,
-      y: element.y + 24,
-    };
-    replace([...drawing.elements, copy]);
-    setSelected(copy.id);
+    copySelection();
+    pasteSelection();
   }
   function sendToBack() {
-    if (!drawing || !element) return;
-    replace([
-      element,
-      ...drawing.elements.filter((candidate) => candidate.id !== element.id),
-    ]);
+    reorderSelection("back");
+  }
+  function bringToFront() {
+    reorderSelection("front");
+  }
+  function moveForward() {
+    reorderSelection("forward");
+  }
+  function moveBackward() {
+    reorderSelection("backward");
   }
   function download(format: "svg" | "png" = "svg") {
     if (!svg.current || !drawing) return;
@@ -714,12 +1422,15 @@ export default function App() {
           <EditorPage
             drawing={drawing}
             element={element}
-            selected={selected}
+            selectedIds={selectedIds}
             tool={tool}
             grid={grid}
             zoom={zoom}
             status={status}
-            canUndo={history.length > 0}
+            guides={guides}
+            selectionBox={selectionBox}
+            onTextDoubleClick={beginTextEdit}
+            canUndo={history.length > 0 || Boolean(editBaseline.current)}
             canRedo={future.length > 0}
             svgRef={svg}
             onBack={() => void goToLibrary()}
@@ -734,10 +1445,24 @@ export default function App() {
             onFitZoom={() => setZoom(fitZoom())}
             onZoomIn={() => setZoom((value) => Math.min(150, value + 10))}
             onUpdate={update}
+            onFinishTextEdit={finishTextEdit}
             onDuplicate={duplicate}
+            onCopy={copySelection}
+            onPaste={pasteSelection}
+            onGroup={groupSelection}
+            onUngroup={ungroupSelection}
+            onToggleLock={toggleLock}
+            onToggleVisibility={toggleVisibility}
+            onToggleLockFor={toggleLockFor}
+            onToggleVisibilityFor={toggleVisibilityFor}
+            onBringToFront={bringToFront}
+            onMoveForward={moveForward}
+            onMoveBackward={moveBackward}
             onSendToBack={sendToBack}
+            onAlign={alignSelection}
+            onDistribute={distributeSelection}
             onRemove={remove}
-            onSelect={setSelected}
+            onSelect={selectTarget}
           />
         )
       )}

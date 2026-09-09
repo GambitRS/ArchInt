@@ -29,7 +29,7 @@ function validDocument(d) {
   )
     return false;
   const ids = new Set();
-  return d.elements.every((e) => {
+  const valid = d.elements.every((e) => {
     if (!e || typeof e.id !== "string" || e.id.length > 100 || ids.has(e.id))
       return false;
     ids.add(e.id);
@@ -49,6 +49,22 @@ function validDocument(d) {
       ["fill", "stroke"].every(
         (k) => typeof e[k] === "string" && /^#[a-f0-9]{6}$/i.test(e[k]),
       ) &&
+      (e.rotation === undefined ||
+        (Number.isFinite(e.rotation) && Math.abs(e.rotation) <= 3600)) &&
+      (e.groupId === undefined ||
+        (typeof e.groupId === "string" && e.groupId.length <= 100)) &&
+      (e.parentId === undefined ||
+        (typeof e.parentId === "string" && e.parentId.length <= 100)) &&
+      (e.locked === undefined || typeof e.locked === "boolean") &&
+      (e.hidden === undefined || typeof e.hidden === "boolean") &&
+      (e.strokeWidth === undefined ||
+        (Number.isFinite(e.strokeWidth) && e.strokeWidth > 0 && e.strokeWidth <= 100)) &&
+      (e.fontWeight === undefined || [400, 500, 600, 700].includes(e.fontWeight)) &&
+      (e.lineHeight === undefined ||
+        (Number.isFinite(e.lineHeight) && e.lineHeight >= 1 && e.lineHeight <= 3)) &&
+      (e.textAlign === undefined || ["left", "center", "right"].includes(e.textAlign)) &&
+      (e.wrap === undefined || typeof e.wrap === "boolean") &&
+      (e.overflow === undefined || ["visible", "hidden"].includes(e.overflow)) &&
       (e.points === undefined ||
         (Array.isArray(e.points) &&
           e.points.length <= 20000 &&
@@ -60,6 +76,12 @@ function validDocument(d) {
           )))
     );
   });
+  if (!valid) return false;
+  return d.elements.every(
+    (e) =>
+      e.parentId === undefined ||
+      (e.parentId !== e.id && ids.has(e.parentId)),
+  );
 }
 
 function mountWorkspace(app, db) {
