@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "description": "Database specification for the Hello World API",
+  "tables": [
+    {
+      "name": "User",
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "primaryKey": true,
+          "autoIncrement": true
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "notNull": true
+        },
+        {
+          "name": "email",
+          "type": "TEXT",
+          "notNull": true,
+          "unique": true
+        },
+        {
+          "name": "role",
+          "type": "TEXT",
+          "notNull": true,
+          "default": "user",
+          "allowedValues": [
+            "admin",
+            "user"
+          ]
+        },
+        {
+          "name": "password",
+          "type": "TEXT",
+          "notNull": true
+        }
+      ]
+    }
+  ],
+  "relations": []
+}
