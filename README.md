@@ -6,10 +6,15 @@ A small Node.js backend using Express and SQLite.
 
 ```bash
 npm install
+npm run build
 npm start
 ```
 
-The API is available at `http://localhost:3000/api`.
+The React/TypeScript frontend is built into `public/` and is served by the backend at
+`http://localhost:3000/`. The API is available at `http://localhost:3000/api`.
+
+For frontend development, run `npm run frontend:dev` in a separate terminal. The
+production build command remains `npm run build`.
 
 To create or synchronize the SQLite database without starting the web server, run:
 

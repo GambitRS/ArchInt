@@ -7,11 +7,24 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
+    "build": "npm run frontend:build",
     "db:sync": "node src/sync-database.js",
-    "test": "node --test"
+    "test": "node --test",
+    "frontend:dev": "vite --config client/vite.config.mts",
+    "frontend:build": "vite build --config client/vite.config.mts",
+    "frontend:typecheck": "tsc --noEmit -p client/tsconfig.json"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "@vitejs/plugin-react": "^6.1.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.2"
   }
 }

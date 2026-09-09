@@ -1,6 +1,8 @@
+const path = require("node:path");
 const express = require("express");
 const { hashPassword } = require("./password");
 const USER_ROLES = new Set(["admin", "user"]);
+const PUBLIC_DIRECTORY = path.resolve(__dirname, "..", "public");
 
 function publicUser(user) {
   return {
@@ -53,6 +55,7 @@ function createApp(db) {
   const app = express();
 
   app.use(express.json());
+  app.use(express.static(PUBLIC_DIRECTORY));
 
   app.get("/", (_request, response) => {
     response.json({ message: "Hello, world!", api: "/api" });
