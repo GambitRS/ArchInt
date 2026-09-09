@@ -9,7 +9,11 @@ import { CreateDrawingDialog } from "./library/CreateDrawingDialog";
 import { DrawingLibrary } from "./library/DrawingLibrary";
 import type { SaveIssue, Screen, Template, User } from "./app/types";
 import {
+  anchorForPoint,
+  anchorPoint,
   boundsForElements,
+  connectorLabelPoint,
+  connectorPoints,
   eraseAtPoint,
   elementBounds,
   intersects,
@@ -108,6 +112,12 @@ export default function App() {
     scrollLeft: number;
     scrollTop: number;
     scroll: HTMLElement;
+  } | null>(null);
+  const connectorDrag = useRef<{
+    id: string;
+    handle: "source" | "target" | "waypoint";
+    index?: number;
+    original: Element[];
   } | null>(null);
   const pending = useRef(new Map<string, Drawing>());
   const revisions = useRef(new Map<string, number>());
@@ -251,7 +261,8 @@ export default function App() {
         resize.current ||
         rotate.current ||
         marquee.current ||
-        eraser.current
+        eraser.current ||
+        connectorDrag.current
       ) {
         e.preventDefault();
         e.returnValue = "";
@@ -417,7 +428,18 @@ export default function App() {
     if (!drawing || !selectedIds.length) return;
     const ids = moveIdsForSelection(drawing.elements, selectedIds);
     if (!canMove(drawing.elements, ids)) return;
-    replace(drawing.elements.filter((candidate) => !ids.includes(candidate.id)));
+    const removed = new Set(ids);
+    replace(
+      drawing.elements.filter(
+        (candidate) =>
+          !removed.has(candidate.id) &&
+          !(
+            candidate.kind === "arrow" &&
+            (removed.has(candidate.sourceAnchor?.elementId || "") ||
+              removed.has(candidate.targetAnchor?.elementId || ""))
+          ),
+      ),
+    );
     setSelectedIds([]);
   };
   function groupSelection() {
@@ -508,6 +530,11 @@ export default function App() {
         (groupId) => [groupId, `group-${crypto.randomUUID()}`],
       ),
     );
+    const remapAnchor = (anchor: Element["sourceAnchor"]) => {
+      if (!anchor) return undefined;
+      const elementId = idMap.get(anchor.elementId);
+      return elementId ? { ...anchor, elementId } : undefined;
+    };
     const pasted = source.map((candidate) => ({
       ...structuredClone(candidate),
       id: idMap.get(candidate.id)!,
@@ -515,6 +542,8 @@ export default function App() {
       y: candidate.y + 24,
       groupId: candidate.groupId ? groupMap.get(candidate.groupId) : undefined,
       parentId: candidate.parentId ? idMap.get(candidate.parentId) : undefined,
+      sourceAnchor: remapAnchor(candidate.sourceAnchor),
+      targetAnchor: remapAnchor(candidate.targetAnchor),
       locked: false,
       hidden: false,
     }));
@@ -881,6 +910,31 @@ export default function App() {
       h: Math.abs(end.y - start.y),
     };
   }
+  function anchorElementAtPoint(
+    elements: Element[],
+    x: number,
+    y: number,
+    excludeId?: string,
+  ): Element | undefined {
+    return [...elements]
+      .reverse()
+      .find((candidate) => {
+        if (
+          candidate.id === excludeId ||
+          candidate.hidden ||
+          candidate.kind === "arrow" ||
+          candidate.kind === "pen"
+        )
+          return false;
+        const bounds = elementBounds(candidate, elements);
+        return (
+          x >= bounds.x &&
+          x <= bounds.x + bounds.w &&
+          y >= bounds.y &&
+          y <= bounds.y + bounds.h
+        );
+      });
+  }
   function down(e: PointerEvent<SVGSVGElement>) {
     if (e.button !== 0 || !drawing) return;
     if (spacePressed.current) {
@@ -906,11 +960,40 @@ export default function App() {
     const rotateTarget = svgTarget
       .closest("[data-rotate-handle]")
       ?.getAttribute("data-rotate-handle");
-    const target = svgTarget.closest("[data-element]")?.getAttribute("data-element");
+    const connectorHandleValue = svgTarget
+      .closest("[data-connector-handle]")
+      ?.getAttribute("data-connector-handle");
+    const rawTarget = svgTarget.closest("[data-element]")?.getAttribute("data-element");
+    const anchorTarget = svgTarget
+      .closest("[data-anchor-element]")
+      ?.getAttribute("data-anchor-element");
+    const target = anchorTarget || rawTarget;
     const additive = e.shiftKey || e.metaKey || e.ctrlKey;
     finishTextEdit();
     setGuides([]);
     setSelectionBox(null);
+    if (tool === "select" && connectorHandleValue && rawTarget) {
+      const connector = drawing.elements.find((candidate) => candidate.id === rawTarget);
+      if (
+        connector?.kind === "arrow" &&
+        !hasLockedAncestor(drawing.elements, connector.id)
+      ) {
+        const waypointMatch = connectorHandleValue.match(/^waypoint:(\d+)$/);
+        connectorDrag.current = {
+          id: connector.id,
+          handle: waypointMatch
+            ? "waypoint"
+            : connectorHandleValue === "source"
+              ? "source"
+              : "target",
+          index: waypointMatch ? Number(waypointMatch[1]) : undefined,
+          original: structuredClone(drawing.elements),
+        };
+        setSelectedIds([connector.id]);
+        e.currentTarget.setPointerCapture(e.pointerId);
+      }
+      return;
+    }
     if (tool === "eraser") {
       eraser.current = { original: structuredClone(drawing.elements) };
       e.currentTarget.setPointerCapture(e.pointerId);
@@ -999,6 +1082,15 @@ export default function App() {
       }
       return;
     }
+    const sourceElement =
+      tool === "arrow"
+        ? target
+          ? drawing.elements.find(
+              (candidate) =>
+                candidate.id === target && !["arrow", "pen"].includes(candidate.kind),
+            )
+          : anchorElementAtPoint(drawing.elements, p.x, p.y)
+        : undefined;
     const n: Element = {
       id: crypto.randomUUID(),
       kind: tool,
@@ -1021,7 +1113,7 @@ export default function App() {
             : tool === "container"
               ? "System boundary"
               : tool === "icon"
-                ? "◇"
+                ? ""
                 : "",
       detail: "",
       fill: tool === "container" ? "#f1f5f2" : "#eef3ff",
@@ -1035,6 +1127,11 @@ export default function App() {
       wrap: true,
       overflow: tool === "text" ? "visible" : "hidden",
       points: tool === "pen" ? [[0, 0]] : undefined,
+      sourceAnchor: sourceElement ? anchorForPoint(sourceElement, p.x, p.y) : undefined,
+      route: tool === "arrow" ? "straight" : undefined,
+      waypoints: tool === "arrow" ? [] : undefined,
+      arrowhead: tool === "arrow" ? "triangle" : undefined,
+      iconName: tool === "icon" ? "model" : undefined,
       parentId:
         tool === "card" || tool === "text" || tool === "ellipse" || tool === "icon"
           ? [...drawing.elements]
@@ -1077,6 +1174,94 @@ export default function App() {
         ds.map((candidate) =>
           candidate.id === current ? { ...candidate, elements: erased } : candidate,
         ),
+      );
+      return;
+    }
+    if (connectorDrag.current) {
+      const connectorState = connectorDrag.current;
+      const base = connectorState.original.find(
+        (candidate) => candidate.id === connectorState.id,
+      );
+      if (!base) return;
+      const hovered = anchorElementAtPoint(
+        drawing.elements,
+        p.x,
+        p.y,
+        connectorState.id,
+      );
+      const elements = drawing.elements.map((candidate) => {
+        if (candidate.id !== connectorState.id) return candidate;
+        if (connectorState.handle === "waypoint") {
+          if (
+            connectorState.index === undefined ||
+            connectorState.index >= (candidate.waypoints || []).length
+          )
+            return candidate;
+          const waypoints = [...(candidate.waypoints || [])];
+          waypoints[connectorState.index] = { x: p.x, y: p.y };
+          return { ...candidate, waypoints };
+        }
+        const source = candidate.sourceAnchor
+          ? drawing.elements.find(
+              (item) => item.id === candidate.sourceAnchor?.elementId,
+            )
+          : undefined;
+        const target = candidate.targetAnchor
+          ? drawing.elements.find(
+              (item) => item.id === candidate.targetAnchor?.elementId,
+            )
+          : undefined;
+        const start = source
+          ? anchorPoint(source, candidate.sourceAnchor!.side, candidate.sourceAnchor!.offset)
+          : { x: candidate.x, y: candidate.y };
+        const end = target
+          ? anchorPoint(target, candidate.targetAnchor!.side, candidate.targetAnchor!.offset)
+          : { x: candidate.x + candidate.w, y: candidate.y + candidate.h };
+        if (connectorState.handle === "source") {
+          if (hovered) {
+            const anchor = anchorForPoint(hovered, p.x, p.y);
+            const point = anchorPoint(hovered, anchor.side, anchor.offset);
+            return {
+              ...candidate,
+              sourceAnchor: anchor,
+              x: point.x,
+              y: point.y,
+              w: end.x - point.x,
+              h: end.y - point.y,
+            };
+          }
+          return {
+            ...candidate,
+            sourceAnchor: undefined,
+            x: p.x,
+            y: p.y,
+            w: end.x - p.x,
+            h: end.y - p.y,
+          };
+        }
+        if (hovered) {
+          const anchor = anchorForPoint(hovered, p.x, p.y);
+          const point = anchorPoint(hovered, anchor.side, anchor.offset);
+          return {
+            ...candidate,
+            targetAnchor: anchor,
+            x: start.x,
+            y: start.y,
+            w: point.x - start.x,
+            h: point.y - start.y,
+          };
+        }
+        return {
+          ...candidate,
+          targetAnchor: undefined,
+          x: start.x,
+          y: start.y,
+          w: p.x - start.x,
+          h: p.y - start.y,
+        };
+      });
+      setDrawings((ds) =>
+        ds.map((candidate) => (candidate.id === current ? { ...candidate, elements } : candidate)),
       );
       return;
     }
@@ -1150,7 +1335,22 @@ export default function App() {
           ],
         };
       }
-      if (tool === "arrow") return { ...n, w: p.x - base.x, h: p.y - base.y };
+      if (tool === "arrow") {
+        const source = base.sourceAnchor
+          ? d.original.find((candidate) => candidate.id === base.sourceAnchor?.elementId)
+          : undefined;
+        const start = source
+          ? anchorPoint(source, base.sourceAnchor!.side, base.sourceAnchor!.offset)
+          : { x: base.x, y: base.y };
+        return {
+          ...n,
+          x: start.x,
+          y: start.y,
+          w: p.x - start.x,
+          h: p.y - start.y,
+          targetAnchor: undefined,
+        };
+      }
       return translateElement(original, nextX, nextY);
     });
     setDrawings((ds) =>
@@ -1178,7 +1378,7 @@ export default function App() {
       const box = pointerBounds(start, end);
       const picked = drawing.elements
         .filter((candidate) => !candidate.hidden && !candidate.locked)
-        .filter((candidate) => intersects(elementBounds(candidate), box))
+        .filter((candidate) => intersects(elementBounds(candidate, drawing.elements), box))
         .flatMap((candidate) => groupMembers(drawing.elements, candidate.id));
       const next = start.additive
         ? [...new Set([...start.originalIds, ...picked])]
@@ -1186,6 +1386,14 @@ export default function App() {
       setSelectedIds(next);
       marquee.current = null;
       setSelectionBox(null);
+      return;
+    }
+    if (connectorDrag.current && drawing) {
+      setHistory((h) => [...h.slice(-49), connectorDrag.current!.original]);
+      setFuture([]);
+      commit({ ...drawing, updated: new Date().toISOString() });
+      connectorDrag.current = null;
+      setGuides([]);
       return;
     }
     if (rotate.current && drawing) {
@@ -1205,11 +1413,58 @@ export default function App() {
       return;
     }
     if (!drag.current || !drawing) return;
+    const activeDrag = drag.current;
+    let finalElements = drawing.elements;
+    if (tool === "arrow") {
+      const connector = finalElements.find((candidate) => candidate.id === activeDrag.id);
+      const end = e
+        ? point(e)
+        : { x: activeDrag.x + (connector?.w || 0), y: activeDrag.y + (connector?.h || 0) };
+      const hovered = anchorElementAtPoint(
+        finalElements,
+        end.x,
+        end.y,
+        activeDrag.id,
+      );
+      if (connector) {
+        const source = connector.sourceAnchor
+          ? finalElements.find(
+              (candidate) => candidate.id === connector.sourceAnchor?.elementId,
+            )
+          : undefined;
+        const start = source
+          ? anchorPoint(source, connector.sourceAnchor!.side, connector.sourceAnchor!.offset)
+          : { x: connector.x, y: connector.y };
+        finalElements = finalElements.map((candidate) => {
+          if (candidate.id !== connector.id) return candidate;
+          if (!hovered) {
+            return {
+              ...candidate,
+              targetAnchor: undefined,
+              x: start.x,
+              y: start.y,
+              w: end.x - start.x,
+              h: end.y - start.y,
+            };
+          }
+          const anchor = anchorForPoint(hovered, end.x, end.y);
+          const targetPoint = anchorPoint(hovered, anchor.side, anchor.offset);
+          return {
+            ...candidate,
+            targetAnchor: anchor,
+            x: start.x,
+            y: start.y,
+            w: targetPoint.x - start.x,
+            h: targetPoint.y - start.y,
+          };
+        });
+      }
+    }
     if (tool === "select") {
-      setHistory((h) => [...h.slice(-49), drag.current!.original]);
+      setHistory((h) => [...h.slice(-49), activeDrag.original]);
       setFuture([]);
     }
-    commit({ ...drawing, updated: new Date().toISOString() });
+    commit({ ...drawing, elements: finalElements, updated: new Date().toISOString() });
     drag.current = null;
     setGuides([]);
     setTool("select");
@@ -1223,6 +1478,17 @@ export default function App() {
   function duplicate() {
     copySelection();
     pasteSelection();
+  }
+  function addWaypoint() {
+    if (!drawing || selectedIds.length !== 1 || element?.kind !== "arrow") return;
+    const point = connectorLabelPoint(connectorPoints(element, drawing.elements));
+    replace(
+      drawing.elements.map((candidate) =>
+        candidate.id === element.id
+          ? { ...candidate, waypoints: [...(candidate.waypoints || []), point] }
+          : candidate,
+      ),
+    );
   }
   function sendToBack() {
     reorderSelection("back");
@@ -1430,6 +1696,7 @@ export default function App() {
             guides={guides}
             selectionBox={selectionBox}
             onTextDoubleClick={beginTextEdit}
+            showAnchors={tool === "arrow"}
             canUndo={history.length > 0 || Boolean(editBaseline.current)}
             canRedo={future.length > 0}
             svgRef={svg}
@@ -1445,6 +1712,7 @@ export default function App() {
             onFitZoom={() => setZoom(fitZoom())}
             onZoomIn={() => setZoom((value) => Math.min(150, value + 10))}
             onUpdate={update}
+            onAddWaypoint={addWaypoint}
             onFinishTextEdit={finishTextEdit}
             onDuplicate={duplicate}
             onCopy={copySelection}

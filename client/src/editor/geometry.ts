@@ -1,4 +1,4 @@
-import type { Element } from "../diagram";
+import type { AnchorRef, AnchorSide, Element } from "../diagram";
 
 export type ResizeHandle = "nw" | "ne" | "se" | "sw";
 export type Bounds = { x: number; y: number; w: number; h: number };
@@ -86,7 +86,139 @@ function rotatePoint(
   };
 }
 
-export function elementBounds(element: Element): Bounds {
+export type Point = { x: number; y: number };
+
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
+
+export function anchorPoint(
+  element: Element,
+  side: AnchorSide,
+  offset: number,
+): Point {
+  const t = clamp01(offset);
+  const local =
+    side === "top"
+      ? { x: element.w * t, y: 0 }
+      : side === "right"
+        ? { x: element.w, y: element.h * t }
+        : side === "bottom"
+          ? { x: element.w * t, y: element.h }
+          : { x: 0, y: element.h * t };
+  const angle = ((element.rotation || 0) * Math.PI) / 180;
+  const rotated = angle
+    ? rotatePoint(local.x, local.y, element.w / 2, element.h / 2, angle)
+    : local;
+  return { x: element.x + rotated.x, y: element.y + rotated.y };
+}
+
+export function anchorForPoint(
+  element: Element,
+  x: number,
+  y: number,
+): AnchorRef {
+  const angle = -((element.rotation || 0) * Math.PI) / 180;
+  const localWorld = angle
+    ? rotatePoint(
+        x,
+        y,
+        element.x + element.w / 2,
+        element.y + element.h / 2,
+        angle,
+      )
+    : { x, y };
+  const localX = localWorld.x - element.x;
+  const localY = localWorld.y - element.y;
+  const distances = [
+    { side: "top" as const, distance: Math.abs(localY) },
+    { side: "right" as const, distance: Math.abs(element.w - localX) },
+    { side: "bottom" as const, distance: Math.abs(element.h - localY) },
+    { side: "left" as const, distance: Math.abs(localX) },
+  ];
+  const side = distances.reduce((best, candidate) =>
+    candidate.distance < best.distance ? candidate : best,
+  ).side;
+  const offset =
+    side === "top" || side === "bottom"
+      ? element.w
+        ? localX / element.w
+        : 0.5
+      : element.h
+        ? localY / element.h
+        : 0.5;
+  return {
+    elementId: element.id,
+    side,
+    offset: clamp01(offset),
+  };
+}
+
+function addDistinctPoint(points: Point[], point: Point) {
+  const previous = points[points.length - 1];
+  if (!previous || previous.x !== point.x || previous.y !== point.y) {
+    points.push(point);
+  }
+}
+
+export function connectorPoints(element: Element, elements: Element[]): Point[] {
+  const fallbackStart = { x: element.x, y: element.y };
+  const fallbackEnd = { x: element.x + element.w, y: element.y + element.h };
+  const source = element.sourceAnchor
+    ? elements.find((candidate) => candidate.id === element.sourceAnchor?.elementId)
+    : undefined;
+  const target = element.targetAnchor
+    ? elements.find((candidate) => candidate.id === element.targetAnchor?.elementId)
+    : undefined;
+  const start = source
+    ? anchorPoint(source, element.sourceAnchor!.side, element.sourceAnchor!.offset)
+    : fallbackStart;
+  const end = target
+    ? anchorPoint(target, element.targetAnchor!.side, element.targetAnchor!.offset)
+    : fallbackEnd;
+  const stops = [start, ...(element.waypoints || []), end];
+  if (element.route !== "orthogonal") {
+    const points: Point[] = [];
+    stops.forEach((point) => addDistinctPoint(points, point));
+    return points;
+  }
+  const points: Point[] = [start];
+  for (let index = 1; index < stops.length; index += 1) {
+    const previous = stops[index - 1];
+    const next = stops[index];
+    if (previous.x !== next.x && previous.y !== next.y) {
+      addDistinctPoint(points, { x: next.x, y: previous.y });
+    }
+    addDistinctPoint(points, next);
+  }
+  return points;
+}
+
+export function connectorLabelPoint(points: Point[]): Point {
+  if (!points.length) return { x: 0, y: 0 };
+  if (points.length === 1) return points[0];
+  const lengths = points.slice(1).map((point, index) =>
+    Math.hypot(point.x - points[index].x, point.y - points[index].y),
+  );
+  const total = lengths.reduce((sum, length) => sum + length, 0);
+  if (!total) return points[0];
+  let remaining = total / 2;
+  for (let index = 1; index < points.length; index += 1) {
+    const length = lengths[index - 1];
+    if (remaining <= length) {
+      const start = points[index - 1];
+      const ratio = length ? remaining / length : 0;
+      return {
+        x: start.x + (points[index].x - start.x) * ratio,
+        y: start.y + (points[index].y - start.y) * ratio,
+      };
+    }
+    remaining -= length;
+  }
+  return points[points.length - 1];
+}
+
+export function elementBounds(element: Element, elements?: Element[]): Bounds {
   if (element.kind === "pen") {
     const points = (element.points || []).map(([x, y]) => ({
       x: element.x + x,
@@ -103,6 +235,18 @@ export function elementBounds(element: Element): Bounds {
       };
     }
     return { x: element.x, y: element.y, w: 0, h: 0 };
+  }
+
+  if (element.kind === "arrow" && elements) {
+    const points = connectorPoints(element, elements);
+    const xs = points.map((point) => point.x);
+    const ys = points.map((point) => point.y);
+    return {
+      x: Math.min(...xs),
+      y: Math.min(...ys),
+      w: Math.max(...xs) - Math.min(...xs),
+      h: Math.max(...ys) - Math.min(...ys),
+    };
   }
 
   const localPoints =
@@ -143,7 +287,7 @@ export function boundsForElements(
   const wanted = ids ? new Set(ids) : null;
   const bounds = elements
     .filter((element) => !wanted || wanted.has(element.id))
-    .map(elementBounds);
+    .map((element) => elementBounds(element, elements));
   if (!bounds.length) return null;
   const left = Math.min(...bounds.map((bound) => bound.x));
   const top = Math.min(...bounds.map((bound) => bound.y));
@@ -182,7 +326,7 @@ export function snapTranslation(
   const movingSet = new Set(movingIds);
   const others = elements
     .filter((element) => !movingSet.has(element.id) && !element.hidden)
-    .map(elementBounds);
+    .map((element) => elementBounds(element, elements));
   const xAnchors = [moving.x, moving.x + moving.w / 2, moving.x + moving.w];
   const yAnchors = [moving.y, moving.y + moving.h / 2, moving.y + moving.h];
   const xTargets = others.flatMap((bound) => [

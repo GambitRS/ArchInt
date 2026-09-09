@@ -1,5 +1,11 @@
 import type { PointerEventHandler, Ref } from "react";
-import { boundsForElements, type SnapGuide } from "./editor/geometry";
+import {
+  anchorPoint,
+  boundsForElements,
+  connectorLabelPoint,
+  connectorPoints,
+  type SnapGuide,
+} from "./editor/geometry";
 export type Kind =
   | "card"
   | "container"
@@ -10,6 +16,26 @@ export type Kind =
   | "icon";
 export type TextAlign = "left" | "center" | "right";
 export type OverflowMode = "visible" | "hidden";
+export type AnchorSide = "top" | "right" | "bottom" | "left";
+export type AnchorRef = {
+  elementId: string;
+  side: AnchorSide;
+  offset: number;
+};
+export type ConnectorRoute = "straight" | "orthogonal";
+export type Arrowhead = "none" | "open" | "triangle" | "circle";
+export type Waypoint = { x: number; y: number };
+export type IconName =
+  | "computer"
+  | "person"
+  | "cloud"
+  | "model"
+  | "database"
+  | "shield"
+  | "folder"
+  | "terminal"
+  | "globe"
+  | "microphone";
 export type Element = {
   id: string;
   kind: Kind;
@@ -34,6 +60,12 @@ export type Element = {
   textAlign?: TextAlign;
   wrap?: boolean;
   overflow?: OverflowMode;
+  sourceAnchor?: AnchorRef;
+  targetAnchor?: AnchorRef;
+  route?: ConnectorRoute;
+  waypoints?: Waypoint[];
+  arrowhead?: Arrowhead;
+  iconName?: IconName;
 };
 export type Drawing = {
   id: string;
@@ -118,7 +150,7 @@ export function makeExample(): Element[] {
     300,
     235,
     110,
-    "◉  You",
+    "You",
     "A prompt. An idea. A goal.",
     "#eff5ef",
     "#b4cdbb",
@@ -166,12 +198,7 @@ export function makeExample(): Element[] {
         "#7392b8",
       );
   });
-  [
-    "☁  Cloud model",
-    "▣  Local model",
-    "◇  Vision model",
-    "◎  Speech model",
-  ].forEach((s, i) =>
+  ["Cloud model", "Local model", "Vision model", "Speech model"].forEach((s, i) =>
     add(
       "model" + i,
       "card",
@@ -218,7 +245,7 @@ export function makeExample(): Element[] {
     "#cbd9c5",
     19,
   );
-  ["▤  Documents", "◎  Browser", "▣  Terminal", "◇  Images", "▦  Data"].forEach(
+  ["Documents", "Browser", "Terminal", "Images", "Data"].forEach(
     (s, i) =>
       add(
         "action" + i,
@@ -243,6 +270,65 @@ export function makeExample(): Element[] {
       element.parentId = "actions";
     }
   }
+  const iconNames: Record<string, IconName> = {
+    user: "person",
+    computer: "computer",
+    models: "cloud",
+    actions: "folder",
+    row0: "computer",
+    row1: "model",
+    row2: "database",
+    row3: "shield",
+    row4: "terminal",
+    row5: "model",
+    model0: "cloud",
+    model1: "model",
+    model2: "globe",
+    model3: "microphone",
+    action0: "folder",
+    action1: "globe",
+    action2: "terminal",
+    action3: "cloud",
+    action4: "database",
+  };
+  for (const element of list) {
+    if (iconNames[element.id]) element.iconName = iconNames[element.id];
+  }
+  const bind = (
+    id: string,
+    sourceId: string,
+    sourceSide: AnchorSide,
+    sourceOffset: number,
+    targetId: string,
+    targetSide: AnchorSide,
+    targetOffset: number,
+    route: ConnectorRoute = "straight",
+    arrowhead: Arrowhead = "triangle",
+    text = "",
+  ) => {
+    const element = list.find((candidate) => candidate.id === id);
+    if (!element) return;
+    element.sourceAnchor = { elementId: sourceId, side: sourceSide, offset: sourceOffset };
+    element.targetAnchor = { elementId: targetId, side: targetSide, offset: targetOffset };
+    element.route = route;
+    element.arrowhead = arrowhead;
+    element.text = text;
+  };
+  bind("request", "user", "right", 0.5, "row0", "left", 0.5, "orthogonal", "triangle", "Request");
+  for (let i = 0; i < 5; i += 1) {
+    bind(
+      "flow" + i,
+      "row" + i,
+      "bottom",
+      0.5,
+      "row" + (i + 1),
+      "top",
+      0.5,
+      "straight",
+      "triangle",
+    );
+  }
+  bind("model-link", "computer", "right", 0.5, "models", "left", 0.5, "straight", "triangle", "Routes");
   return list;
 }
 
@@ -297,11 +383,12 @@ function textAnchor(align: TextAlign): "start" | "middle" | "end" {
 
 function textPosition(element: Element, align: TextAlign, padding = 18) {
   if (align === "center") return element.w / 2;
+  const iconPadding = element.iconName ? 38 : 0;
   return align === "right"
     ? element.w - padding
     : element.kind === "text"
-      ? 0
-      : padding;
+      ? iconPadding
+      : padding + iconPadding;
 }
 
 function isHiddenByParent(element: Element, elements: Element[]): boolean {
@@ -318,12 +405,150 @@ function isHiddenByParent(element: Element, elements: Element[]): boolean {
   return false;
 }
 
+const anchorSides: AnchorSide[] = ["top", "right", "bottom", "left"];
+
+function IconGlyph({
+  name,
+  x,
+  y,
+  w,
+  h,
+  color,
+  fill,
+}: {
+  name: IconName;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  color: string;
+  fill: string;
+}) {
+  const line = {
+    fill: "none",
+    stroke: color,
+    strokeWidth: 7,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+  };
+  const softFill = fill === "none" ? "none" : fill;
+  return (
+    <g transform={`translate(${x} ${y}) scale(${w / 100} ${h / 100})`} aria-hidden="true">
+      {name === "computer" && (
+        <>
+          <rect x="12" y="10" width="76" height="55" rx="8" {...line} />
+          <path d="M36 82h28M50 65v17M25 82h50" {...line} />
+        </>
+      )}
+      {name === "person" && (
+        <>
+          <circle cx="50" cy="28" r="15" fill={softFill} stroke={color} strokeWidth="7" />
+          <path d="M20 88c3-22 16-34 30-34s27 12 30 34" {...line} />
+        </>
+      )}
+      {name === "cloud" && (
+        <path
+          d="M22 76h55a17 17 0 0 0 2-34 29 29 0 0 0-54-2A18 18 0 0 0 22 76Z"
+          fill={softFill}
+          fillOpacity=".45"
+          stroke={color}
+          strokeWidth="7"
+          strokeLinejoin="round"
+        />
+      )}
+      {name === "model" && (
+        <>
+          <path d="M27 22h46l15 15v26L73 78H27L12 63V37Z" {...line} fill={softFill} fillOpacity=".35" />
+          <path d="M40 40h20M40 60h20M50 31v9M50 60v9M31 50h9M60 50h9" {...line} />
+        </>
+      )}
+      {name === "database" && (
+        <>
+          <ellipse cx="50" cy="24" rx="30" ry="12" fill={softFill} fillOpacity=".45" stroke={color} strokeWidth="7" />
+          <path d="M20 24v48c0 7 13 12 30 12s30-5 30-12V24M20 48c0 7 13 12 30 12s30-5 30-12" {...line} />
+        </>
+      )}
+      {name === "shield" && (
+        <path d="M50 10 82 22v25c0 21-14 34-32 43C32 81 18 68 18 47V22Z" {...line} fill={softFill} fillOpacity=".4" />
+      )}
+      {name === "folder" && (
+        <path d="M10 28h31l9 10h40v42H10Z" {...line} fill={softFill} fillOpacity=".4" />
+      )}
+      {name === "terminal" && (
+        <>
+          <rect x="10" y="16" width="80" height="68" rx="9" {...line} fill={softFill} fillOpacity=".25" />
+          <path d="m27 40 13 12-13 12M49 67h22" {...line} />
+        </>
+      )}
+      {name === "globe" && (
+        <>
+          <circle cx="50" cy="50" r="38" {...line} />
+          <path d="M12 50h76M50 12c12 10 18 23 18 38s-6 28-18 38M50 12C38 22 32 35 32 50s6 28 18 38" {...line} />
+        </>
+      )}
+      {name === "microphone" && (
+        <>
+          <rect x="35" y="10" width="30" height="52" rx="15" {...line} fill={softFill} fillOpacity=".35" />
+          <path d="M22 48a28 28 0 0 0 56 0M50 76v14M36 90h28" {...line} />
+        </>
+      )}
+    </g>
+  );
+}
+
+function pointsPath(points: { x: number; y: number }[]): string {
+  return points
+    .map((point, index) => `${index ? "L" : "M"}${point.x} ${point.y}`)
+    .join(" ");
+}
+
+function ConnectorArrowhead({
+  arrowhead,
+  points,
+  color,
+  strokeWidth,
+}: {
+  arrowhead: NonNullable<Element["arrowhead"]>;
+  points: { x: number; y: number }[];
+  color: string;
+  strokeWidth: number;
+}) {
+  if (arrowhead === "none" || points.length < 2) return null;
+  let index = points.length - 2;
+  while (
+    index >= 0 &&
+    points[index].x === points[points.length - 1].x &&
+    points[index].y === points[points.length - 1].y
+  ) {
+    index -= 1;
+  }
+  if (index < 0) return null;
+  const end = points[points.length - 1];
+  const previous = points[index];
+  const angle = (Math.atan2(end.y - previous.y, end.x - previous.x) * 180) / Math.PI;
+  if (arrowhead === "circle") {
+    return <circle cx={end.x} cy={end.y} r={Math.max(4, strokeWidth + 1)} fill={color} />;
+  }
+  return (
+    <path
+      d={arrowhead === "triangle" ? "M-12 -7 L0 0 L-12 7 Z" : "M-12 -6 L0 0 L-12 6"}
+      fill={arrowhead === "triangle" ? color : "none"}
+      stroke={color}
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      transform={`translate(${end.x} ${end.y}) rotate(${angle})`}
+    />
+  );
+}
+
 export function Diagram({
   elements,
   selectedIds = [],
   guides = [],
   selectionBox,
   onTextDoubleClick,
+  showAnchors = false,
   svgRef,
   onPointerDown,
   onPointerMove,
@@ -334,6 +559,7 @@ export function Diagram({
   guides?: SnapGuide[];
   selectionBox?: { x: number; y: number; w: number; h: number } | null;
   onTextDoubleClick?: (id: string) => void;
+  showAnchors?: boolean;
   svgRef?: Ref<SVGSVGElement>;
   onPointerDown?: PointerEventHandler<SVGSVGElement>;
   onPointerMove?: PointerEventHandler<SVGSVGElement>;
@@ -371,10 +597,137 @@ export function Diagram({
           ))}
       </defs>
       <rect width="1400" height="900" fill="white" />
-      {visibleElements.map((e) => (
+      <g data-connectors="true">
+        {visibleElements
+          .filter((element) => element.kind === "arrow")
+          .map((e) => {
+            const points = connectorPoints(e, elements);
+            const path = pointsPath(points);
+            const label = connectorLabelPoint(points);
+            const strokeWidth = e.strokeWidth ?? 2.5;
+            const labelLines = e.text.split(/\r?\n/);
+            const labelWidth = Math.max(
+              28,
+              Math.min(220, Math.max(...labelLines.map((line) => line.length * 7 + 18))),
+            );
+            return (
+              <g
+                key={e.id}
+                data-element={e.id}
+                onDoubleClick={() => onTextDoubleClick?.(e.id)}
+                style={{ cursor: onPointerDown ? "move" : undefined }}
+              >
+                <path
+                  d={path}
+                  fill="none"
+                  stroke="transparent"
+                  strokeWidth={Math.max(18, strokeWidth + 12)}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d={path}
+                  fill="none"
+                  stroke={e.stroke}
+                  strokeWidth={strokeWidth}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  data-connector-path="true"
+                />
+                <ConnectorArrowhead
+                  arrowhead={e.arrowhead || "open"}
+                  points={points}
+                  color={e.stroke}
+                  strokeWidth={strokeWidth}
+                />
+                {e.text && (
+                  <g transform={`translate(${label.x} ${label.y})`} pointerEvents="none">
+                    <rect
+                      x={-labelWidth / 2}
+                      y={-14}
+                      width={labelWidth}
+                      height={labelLines.length * 16 + 4}
+                      rx="5"
+                      fill="white"
+                      stroke="#d6e1dc"
+                    />
+                    <text
+                      textAnchor="middle"
+                      y="0"
+                      fill="#355348"
+                      fontSize="12"
+                      fontWeight="600"
+                    >
+                      {labelLines.map((line, index) => (
+                        <tspan key={index} x="0" dy={index ? 15 : 0}>
+                          {line}
+                        </tspan>
+                      ))}
+                    </text>
+                  </g>
+                )}
+                {selectedIds.length === 1 && selected.has(e.id) && (
+                  <g data-selection="true">
+                    <path
+                      d={path}
+                      fill="none"
+                      stroke="#438268"
+                      strokeDasharray="5 3"
+                      strokeWidth="2"
+                      pointerEvents="none"
+                    />
+                    <circle
+                      cx={points[0]?.x}
+                      cy={points[0]?.y}
+                      r="7"
+                      fill="white"
+                      stroke="#438268"
+                      data-connector-handle="source"
+                      role="button"
+                      aria-label="Move connector source"
+                      pointerEvents="all"
+                      style={{ cursor: "grab" }}
+                    />
+                    <circle
+                      cx={points[points.length - 1]?.x}
+                      cy={points[points.length - 1]?.y}
+                      r="7"
+                      fill="white"
+                      stroke="#438268"
+                      data-connector-handle="target"
+                      role="button"
+                      aria-label="Move connector target"
+                      pointerEvents="all"
+                      style={{ cursor: "grab" }}
+                    />
+                    {(e.waypoints || []).map((waypoint, index) => (
+                      <rect
+                        key={index}
+                        x={waypoint.x - 5}
+                        y={waypoint.y - 5}
+                        width="10"
+                        height="10"
+                        rx="2"
+                        fill="white"
+                        stroke="#438268"
+                        data-connector-handle={`waypoint:${index}`}
+                        role="button"
+                        aria-label={`Move waypoint ${index + 1}`}
+                        pointerEvents="all"
+                        style={{ cursor: "move" }}
+                      />
+                    ))}
+                  </g>
+                )}
+              </g>
+            );
+          })}
+      </g>
+      {visibleElements.filter((element) => element.kind !== "arrow").map((e) => (
         <g
           key={e.id}
           data-element={e.id}
+          data-anchor-element={e.kind !== "pen" ? e.id : undefined}
           transform={`translate(${e.x} ${e.y}) rotate(${e.rotation || 0} ${e.w / 2} ${e.h / 2})`}
           style={{ cursor: onPointerDown ? "move" : undefined }}
           onDoubleClick={() => onTextDoubleClick?.(e.id)}
@@ -401,28 +754,6 @@ export function Diagram({
               strokeWidth={e.strokeWidth ?? 2}
             />
           )}
-          {e.kind === "arrow" && (
-            <>
-              <path
-                d={`M0 0 L${e.w} ${e.h}`}
-                stroke="transparent"
-                strokeWidth="18"
-              />
-              <path
-                d={`M0 0 L${e.w} ${e.h}`}
-                fill="none"
-                stroke={e.stroke}
-                strokeWidth={e.strokeWidth ?? 2.5}
-              />
-              <path
-                d="M-10 -5 L0 0 L-10 5"
-                fill="none"
-                stroke={e.stroke}
-                strokeWidth={e.strokeWidth ?? 2.5}
-                transform={`translate(${e.w} ${e.h}) rotate(${(Math.atan2(e.h, e.w) * 180) / Math.PI})`}
-              />
-            </>
-          )}
           {e.kind === "pen" && (
             <polyline
               points={e.points?.map((p) => p.join(",")).join(" ")}
@@ -433,7 +764,29 @@ export function Diagram({
               strokeLinejoin="round"
             />
           )}
-          {!["pen", "arrow"].includes(e.kind) && (
+          {e.kind === "icon" && (
+            <IconGlyph
+              name={e.iconName || "model"}
+              x={0}
+              y={0}
+              w={e.w}
+              h={e.h}
+              color={e.stroke}
+              fill={e.fill}
+            />
+          )}
+          {e.iconName && e.kind !== "icon" && (
+            <IconGlyph
+              name={e.iconName}
+              x={e.kind === "text" ? 0 : 18}
+              y={e.kind === "text" ? 0 : e.kind === "card" && e.h < 60 ? 10 : 16}
+              w={e.kind === "text" ? 26 : 30}
+              h={e.kind === "text" ? 26 : 30}
+              color={e.kind === "text" ? e.stroke : "#486451"}
+              fill={e.fill}
+            />
+          )}
+          {!['pen', 'arrow', 'icon'].includes(e.kind) && (
             <text
               x={textPosition(e, e.textAlign || "left")}
               y={
@@ -471,14 +824,19 @@ export function Diagram({
             </text>
           )}
           {e.kind === "card" && e.detail && (
-            <text x="18" y={e.h < 60 ? 43 : 60} fill="#637990" fontSize="13">
+            <text
+              x={e.iconName ? 54 : 18}
+              y={e.h < 60 ? 43 : 60}
+              fill="#637990"
+              fontSize="13"
+            >
               {wrapLines(
                 e.detail,
                 Math.max(1, e.w - 36),
                 13,
                 e.wrap !== false,
               ).map((line, i) => (
-                <tspan key={i} x="18" dy={i ? 17 : 0}>
+                <tspan key={i} x={e.iconName ? 54 : 18} dy={i ? 17 : 0}>
                   {line}
                 </tspan>
               ))}
@@ -548,6 +906,31 @@ export function Diagram({
           )}
         </g>
       ))}
+      {showAnchors &&
+        visibleElements
+          .filter((element) => !["arrow", "pen"].includes(element.kind))
+          .flatMap((element) =>
+            anchorSides.map((side) => {
+              const point = anchorPoint(element, side, 0.5);
+              return (
+                <circle
+                  key={`${element.id}-${side}`}
+                  cx={point.x}
+                  cy={point.y}
+                  r="5"
+                  fill="white"
+                  stroke="#438268"
+                  strokeWidth="2"
+                  data-anchor-handle={`${element.id}:${side}`}
+                  data-anchor-element={element.id}
+                  role="button"
+                  aria-label={`${side} anchor for ${element.text || element.kind}`}
+                  pointerEvents="all"
+                  style={{ cursor: "crosshair" }}
+                />
+              );
+            }),
+          )}
       {selectedIds.length > 1 && selectedBounds && (
         <rect
           data-selection="true"

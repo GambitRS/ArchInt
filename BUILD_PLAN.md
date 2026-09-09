@@ -10,7 +10,7 @@ User decisions confirmed on September 9, 2026:
 - Connect authentication and saved drawings to the existing backend wherever possible.
 - Design the frontend now and document the detailed route to a complete application.
 
-The interface is implemented as a working first slice, not static screenshots. The exact reference image is not imported as a background: the architecture template consists of individually editable elements. Its simplified illustration demonstrates the structure; the full icon, image, grouping, and routing capabilities below are still needed for reference-level fidelity.
+The interface is implemented as a working first slice, not static screenshots. The exact reference image is not imported as a background: the architecture template consists of individually editable elements. Its simplified illustration demonstrates the structure; advanced asset import and production-scale document workflows remain separate from the editable reference composition.
 
 ## 2. Current implementation
 
@@ -19,7 +19,7 @@ The interface is implemented as a working first slice, not static screenshots. T
 | Sign-in         | Existing user credentials, SQLite sessions, logout, expired-session rejection, basic login throttling            | Account onboarding, recovery, session management, deployment hardening                         |
 | Drawing library | User-owned drawings, search, category filters, live SVG thumbnails, open existing drawing                        | Pagination, duplicate/archive/delete drawings, sorting, thumbnail caching                      |
 | New drawing     | Named blank canvas or editable architecture template                                                             | Template picker with more examples and previews                                                |
-| Editor          | Selection, dragging, cards, containers, text, ellipse, straight arrows, freehand strokes, text-based icons, resize/rotate handles, multi-selection, marquee selection, snapping guides | Bound connectors, real icon catalog, image import |
+| Editor          | Selection, dragging, cards, containers, text, ellipse, freehand strokes, bound straight/orthogonal connectors, labels, arrowheads, draggable endpoints/waypoints, vector icons, resize/rotate handles, multi-selection, marquee selection, snapping guides | Image import and asset library |
 | Properties      | Label, card description, fill, stroke, font size, dimensions, rotation, wrapping, alignment, font weight, line height, overflow, and stroke width | Opacity, corner radius, richer text editing |
 | Organization    | Layer selection, groups/ungroups, container-bound movement, lock/hide, clipboard duplication, arbitrary layer ordering, alignment, and distribution | Nested containers and richer group transforms |
 | History         | Undo/redo of element edits, grouped drag/resize/rotate/erase gestures, and coalesced text edits | Persisted recovery history |
@@ -27,7 +27,7 @@ The interface is implemented as a working first slice, not static screenshots. T
 | Export          | SVG and 2× PNG of the page, excluding selection adornments                                                       | PDF, selected-area export, dimensions/background choices, font embedding                       |
 | Layout          | Desktop three-column editor; stacked properties on narrow displays; responsive login/library                     | Full keyboard canvas navigation and dedicated tablet touch UX                                  |
 
-Current constraints are intentional and should remain visible to developers: page size is fixed at 1400 × 900; container children move with their parent but do not scale with a resize; arrows use absolute endpoints; freehand dimensions do not rescale stroke points; the icon tool inserts an editable glyph; multi-selection does not yet resize as a single transformed group. The library initially contains no fabricated saved drawings. A user can create an architecture template from the banner.
+Current constraints are intentional and should remain visible to developers: page size is fixed at 1400 × 900; container children move with their parent but do not scale with a resize; unbound connectors retain absolute endpoints while named anchors follow their nodes; freehand dimensions do not rescale stroke points; the icon tool inserts an editable vector icon; multi-selection does not yet resize as a single transformed group. Image import remains deferred until asset authorization, size limits, validation, and export behavior are specified. The library initially contains no fabricated saved drawings. A user can create an architecture template from the banner.
 
 ## 3. UI design specification
 
@@ -127,7 +127,7 @@ For the current scope, SVG keeps diagram text and geometry crisp and permits vec
 
 `Drawing`: UUID `id`, owner `userId`, `name`, `category`, JSON `document` containing elements, ISO `updatedAt`, integer `revision`. `Session`: SHA-256 token hash, `userId`, expiration timestamp; plaintext session token exists only in the HttpOnly cookie. Ownership is enforced by the authenticated user, never by a submitted owner ID. Both tables reference User with cascade deletion.
 
-Array order currently defines paint order. Each element stores an ID, kind, position, size, text, detail, fill, stroke, font size, and optional freehand points. The server validates supported shapes, finite geometry, colors, ID uniqueness, document size, and point counts.
+Array order currently defines paint order. Each element stores an ID, kind, position, size, text, detail, fill, stroke, font size, and optional freehand points, styles, vector icon metadata, and connector anchors/routes. The server validates supported shapes, finite geometry, colors, ID uniqueness, document size, anchor references, and point counts.
 
 ### Versioned model for the complete editor
 
@@ -204,6 +204,8 @@ Replace glyph placeholders with a consistent vector icon catalog (computer, pers
 
 Acceptance: reproduce the reference composition with a central device/system, six internal layers, a user request, connected models, bottom action tiles, icons, labels, and connectors. Every component remains editable and bound arrows follow their nodes.
 
+Status: implemented in the current editor slice. Image upload is intentionally deferred until the asset contract is defined; the reference template uses the built-in vector catalog and safe SVG export.
+
 ### Phase 4 — Exports and reliable storage
 
 Add an export dialog for format, scale, page/selection bounds, and background. Verify SVG/PDF font handling and use safe inline assets. Support PNG at 1×/2×/4× with pixel limits to prevent memory spikes. Add JSON import/export with schema version validation, plus per-user recovery drafts. Thumbnail generation must not include selection overlays or editor chrome.
@@ -232,7 +234,7 @@ Existing database/seed tests remain. A new integration test covers bad credentia
 
 Add pure geometry tests for transforms, rotated bounds, resize constraints, connector endpoints, and snapping; command tests for complete undo/redo behavior; document migration roundtrips; queue tests for overlapping edits, navigation, failed requests, retry, and revision conflicts. Add browser journeys for login → create → edit → save → reload, freehand drag at several zoom levels, modal keyboard behavior, and export content. Use visual snapshots on controlled fonts and viewport sizes for the reference template and each main screen.
 
-Validation performed in this implementation: TypeScript check, production frontend build, existing tests, new API integration test, and HTTP checks of the local app/API. Browser interaction and screenshot-based visual verification have not been performed; they remain a release gate rather than an implied test result.
+Validation performed in this implementation: TypeScript check, production frontend build, existing tests, new API integration test, HTTP checks of the local app/API, and screenshot-based visual verification of the rendered reference preview. Full authenticated browser journeys remain a release gate rather than an implied test result.
 
 ## 9. Running and reviewing locally
 

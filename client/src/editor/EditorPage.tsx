@@ -47,6 +47,7 @@ type EditorPageProps = {
   guides: SnapGuide[];
   selectionBox: { x: number; y: number; w: number; h: number } | null;
   onTextDoubleClick: (id: string) => void;
+  showAnchors: boolean;
   canUndo: boolean;
   canRedo: boolean;
   svgRef: RefObject<SVGSVGElement | null>;
@@ -62,6 +63,7 @@ type EditorPageProps = {
   onFitZoom: () => void;
   onZoomIn: () => void;
   onUpdate: (patch: Partial<Element>, remember?: boolean) => void;
+  onAddWaypoint: () => void;
   onFinishTextEdit: () => void;
   onDuplicate: () => void;
   onCopy: () => void;
@@ -93,6 +95,7 @@ export function EditorPage({
   guides,
   selectionBox,
   onTextDoubleClick,
+  showAnchors,
   canUndo,
   canRedo,
   svgRef,
@@ -108,6 +111,7 @@ export function EditorPage({
   onFitZoom,
   onZoomIn,
   onUpdate,
+  onAddWaypoint,
   onFinishTextEdit,
   onDuplicate,
   onCopy,
@@ -233,6 +237,7 @@ export function EditorPage({
                 guides={guides}
                 selectionBox={selectionBox}
                 onTextDoubleClick={onTextDoubleClick}
+                showAnchors={showAnchors}
                 onPointerDown={onPointerDown}
                 onPointerMove={onPointerMove}
                 onPointerUp={onPointerUp}
@@ -290,6 +295,86 @@ export function EditorPage({
                   onBlur={onFinishTextEdit}
                 />
               </label>
+              {element.kind !== "arrow" && element.kind !== "pen" && (
+                <label>
+                  Vector icon
+                  <select
+                    disabled={isLocked}
+                    value={element.iconName || ""}
+                    onChange={(e) =>
+                      onUpdate({
+                        iconName: e.target.value
+                          ? (e.target.value as NonNullable<Element["iconName"]>)
+                          : undefined,
+                      })
+                    }
+                  >
+                    <option value="">No icon</option>
+                    <option value="computer">Computer</option>
+                    <option value="person">Person</option>
+                    <option value="cloud">Cloud</option>
+                    <option value="model">Model / chip</option>
+                    <option value="database">Database</option>
+                    <option value="shield">Shield</option>
+                    <option value="folder">Folder</option>
+                    <option value="terminal">Terminal</option>
+                    <option value="globe">Globe</option>
+                    <option value="microphone">Microphone</option>
+                  </select>
+                </label>
+              )}
+              {element.kind === "arrow" && (
+                <div className="connector-controls">
+                  <span className="eyebrow">CONNECTOR</span>
+                  <label>
+                    Route
+                    <select
+                      disabled={isLocked}
+                      value={element.route || "straight"}
+                      onChange={(e) =>
+                        onUpdate({
+                          route: e.target.value as "straight" | "orthogonal",
+                        })
+                      }
+                    >
+                      <option value="straight">Straight</option>
+                      <option value="orthogonal">Orthogonal</option>
+                    </select>
+                  </label>
+                  <label>
+                    Arrowhead
+                    <select
+                      disabled={isLocked}
+                      value={element.arrowhead || "open"}
+                      onChange={(e) =>
+                        onUpdate({
+                          arrowhead: e.target.value as
+                            | "none"
+                            | "open"
+                            | "triangle"
+                            | "circle",
+                        })
+                      }
+                    >
+                      <option value="triangle">Triangle</option>
+                      <option value="open">Open</option>
+                      <option value="circle">Circle</option>
+                      <option value="none">None</option>
+                    </select>
+                  </label>
+                  <div className="connector-status">
+                    <span>{element.sourceAnchor ? "Named source" : "Free source"}</span>
+                    <span>{element.targetAnchor ? "Named target" : "Free target"}</span>
+                  </div>
+                  <button
+                    className="secondary"
+                    disabled={isLocked}
+                    onClick={onAddWaypoint}
+                  >
+                    Add waypoint
+                  </button>
+                </div>
+              )}
               {element.kind === "card" && (
                 <label>
                   Description

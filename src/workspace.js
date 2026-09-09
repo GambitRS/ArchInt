@@ -5,6 +5,19 @@ const hash = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const lifetime = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_DRAWING_NAME = "Untitled drawing";
 const MAX_IDEMPOTENCY_KEY_LENGTH = 200;
+const ANCHOR_SIDES = ["top", "right", "bottom", "left"];
+const ICON_NAMES = [
+  "computer",
+  "person",
+  "cloud",
+  "model",
+  "database",
+  "shield",
+  "folder",
+  "terminal",
+  "globe",
+  "microphone",
+];
 
 function normalizeDrawingName(value) {
   const name = typeof value === "string" ? value.trim() : "";
@@ -65,6 +78,38 @@ function validDocument(d) {
       (e.textAlign === undefined || ["left", "center", "right"].includes(e.textAlign)) &&
       (e.wrap === undefined || typeof e.wrap === "boolean") &&
       (e.overflow === undefined || ["visible", "hidden"].includes(e.overflow)) &&
+      (e.sourceAnchor === undefined ||
+        (e.sourceAnchor &&
+          typeof e.sourceAnchor.elementId === "string" &&
+          e.sourceAnchor.elementId.length <= 100 &&
+          ANCHOR_SIDES.includes(e.sourceAnchor.side) &&
+          Number.isFinite(e.sourceAnchor.offset) &&
+          e.sourceAnchor.offset >= 0 &&
+          e.sourceAnchor.offset <= 1)) &&
+      (e.targetAnchor === undefined ||
+        (e.targetAnchor &&
+          typeof e.targetAnchor.elementId === "string" &&
+          e.targetAnchor.elementId.length <= 100 &&
+          ANCHOR_SIDES.includes(e.targetAnchor.side) &&
+          Number.isFinite(e.targetAnchor.offset) &&
+          e.targetAnchor.offset >= 0 &&
+          e.targetAnchor.offset <= 1)) &&
+      (e.route === undefined || ["straight", "orthogonal"].includes(e.route)) &&
+      (e.arrowhead === undefined ||
+        ["none", "open", "triangle", "circle"].includes(e.arrowhead)) &&
+      (e.iconName === undefined || ICON_NAMES.includes(e.iconName)) &&
+      (e.waypoints === undefined ||
+        (e.kind === "arrow" &&
+          Array.isArray(e.waypoints) &&
+          e.waypoints.length <= 100 &&
+          e.waypoints.every(
+            (p) =>
+              p &&
+              Number.isFinite(p.x) &&
+              Number.isFinite(p.y) &&
+              Math.abs(p.x) <= 100000 &&
+              Math.abs(p.y) <= 100000,
+          ))) &&
       (e.points === undefined ||
         (Array.isArray(e.points) &&
           e.points.length <= 20000 &&
@@ -81,7 +126,14 @@ function validDocument(d) {
     (e) =>
       e.parentId === undefined ||
       (e.parentId !== e.id && ids.has(e.parentId)),
-  );
+  ) &&
+    d.elements.every(
+      (e) =>
+        (!e.sourceAnchor ||
+          (e.sourceAnchor.elementId !== e.id && ids.has(e.sourceAnchor.elementId))) &&
+        (!e.targetAnchor ||
+          (e.targetAnchor.elementId !== e.id && ids.has(e.targetAnchor.elementId))),
+    );
 }
 
 function mountWorkspace(app, db) {

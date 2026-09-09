@@ -83,6 +83,38 @@ test("sessions, drawing ownership, persistence, validation, and conflicting upda
           textAlign: "center",
           wrap: true,
           overflow: "hidden",
+          iconName: "model",
+        },
+        {
+          id: "n2",
+          kind: "card",
+          x: 360,
+          y: 20,
+          w: 180,
+          h: 90,
+          text: "Worker",
+          detail: "Runs tools",
+          fill: "#ffffff",
+          stroke: "#7392b8",
+          fontSize: 18,
+        },
+        {
+          id: "link",
+          kind: "arrow",
+          x: 210,
+          y: 65,
+          w: 150,
+          h: 0,
+          text: "calls",
+          detail: "",
+          fill: "#ffffff",
+          stroke: "#7392b8",
+          fontSize: 18,
+          sourceAnchor: { elementId: "n1", side: "right", offset: 0.5 },
+          targetAnchor: { elementId: "n2", side: "left", offset: 0.5 },
+          route: "orthogonal",
+          waypoints: [{ x: 285, y: 120 }],
+          arrowhead: "triangle",
         },
       ],
     };
@@ -121,6 +153,25 @@ test("sessions, drawing ownership, persistence, validation, and conflicting upda
             ...doc,
             elements: [
               { ...doc.elements[0], fill: "url(https://bad.invalid)" },
+            ],
+          },
+          cookie,
+        )
+      ).status,
+      400,
+    );
+    assert.equal(
+      (
+        await request(
+          "/api/drawings",
+          "POST",
+          {
+            ...doc,
+            elements: [
+              {
+                ...doc.elements[0],
+                sourceAnchor: { elementId: "missing", side: "right", offset: 0.5 },
+              },
             ],
           },
           cookie,

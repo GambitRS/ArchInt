@@ -966,6 +966,34 @@ kbd {
   grid-template-columns: 1fr 1fr;
   gap: 0 10px;
 }
+.connector-controls {
+  margin-top: 20px;
+  padding: 12px;
+  border: 1px solid #dfe9df;
+  border-radius: 7px;
+  background: #fbfcf8;
+}
+.connector-controls label:first-of-type {
+  margin-top: 13px;
+}
+.connector-status {
+  display: flex;
+  gap: 6px;
+  margin-top: 13px;
+}
+.connector-status span {
+  flex: 1;
+  padding: 7px 5px;
+  border-radius: 4px;
+  background: #eef5ee;
+  color: #63806a;
+  font-size: 9px;
+  text-align: center;
+}
+.connector-controls > .secondary {
+  width: 100%;
+  margin-top: 10px;
+}
 .button-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
