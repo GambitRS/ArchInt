@@ -25,7 +25,7 @@ The interface is implemented as a working first slice, not static screenshots. T
 | History         | Undo/redo of element edits, grouped drag/resize/rotate/erase gestures, and coalesced text edits | Revision history |
 | Save            | Debounced, serialized saves to SQLite with revision conflict detection; per-user browser recovery drafts | Reauthentication without losing an unsaved draft, offline recovery, revision history |
 | Export          | SVG, PNG at 1×/2×/4×, raster PDF, and versioned JSON documents with page/selection bounds and background choices | Server-side export only if deployment requires it |
-| Layout          | Desktop three-column editor; stacked properties on narrow displays; responsive login/library                     | Full keyboard canvas navigation and dedicated tablet touch UX                                  |
+| Layout          | Desktop three-column editor; stacked properties on narrow displays; responsive login/library/editor controls; keyboard-accessible tools, layers, properties, and canvas | Dedicated tablet touch UX validation on target devices |
 
 Current constraints are intentional and should remain visible to developers: page size is fixed at 1400 × 900; container children move with their parent but do not scale with a resize; unbound connectors retain absolute endpoints while named anchors follow their nodes; freehand dimensions do not rescale stroke points; the icon tool inserts an editable vector icon; multi-selection does not yet resize as a single transformed group. Image import remains deferred until asset authorization, size limits, validation, and export behavior are specified. The library initially contains no fabricated saved drawings. A user can create an architecture template from the banner.
 
@@ -235,13 +235,15 @@ Benchmark 100, 500, and 2,000 elements plus long freehand strokes. Establish a r
 
 Acceptance: no clipped core actions, no lost pointer gestures, no selection jump when zoomed, stable exports, no silent lost saves, and keyboard access to every essential workflow.
 
+Status: implemented as the release gate for the current scope. The canvas and editor regions expose landmarks and descriptions, selection adornments are hidden from assistive technology, modal focus is trapped/restored with background inertness, reduced-motion preferences are honored, thumbnail rendering is memoized and contained, and responsive controls were checked against the built local bundle.
+
 ## 8. Testing strategy
 
 Existing database/seed tests remain. A new integration test covers bad credentials, session cookies and public fields, drawing creation/reload, rename/revision increments, conflict rejection, malformed SVG color rejection, cross-user access, cross-origin mutation, logout, relogin persistence, and expired sessions. It uses an isolated in-memory database.
 
 Add pure geometry tests for transforms, rotated bounds, resize constraints, connector endpoints, and snapping; command tests for complete undo/redo behavior; document migration roundtrips; queue tests for overlapping edits, navigation, failed requests, retry, and revision conflicts. Add browser journeys for login → create → edit → save → reload, freehand drag at several zoom levels, modal keyboard behavior, and export content. Use visual snapshots on controlled fonts and viewport sizes for the reference template and each main screen.
 
-Validation performed in this implementation: TypeScript check, production frontend build, existing tests, new API integration test, HTTP checks of the local app/API, and screenshot-based visual verification of the rendered reference preview. Full authenticated browser journeys remain a release gate rather than an implied test result.
+Validation performed in this implementation: TypeScript check, production frontend build, existing tests, backup/recovery and security integration tests, HTTP checks of the local app/API, and screenshot/accessibility-tree verification of the built local editor at the desktop viewport. Full cross-browser and authenticated device-matrix journeys remain deployment-specific follow-up rather than an implied test result.
 
 ## 9. Running and reviewing locally
 

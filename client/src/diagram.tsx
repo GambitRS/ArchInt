@@ -1,4 +1,4 @@
-import type { PointerEventHandler, Ref } from "react";
+import { memo, type PointerEventHandler, type Ref } from "react";
 import {
   anchorPoint,
   boundsForElements,
@@ -542,7 +542,7 @@ function ConnectorArrowhead({
   );
 }
 
-export function Diagram({
+export const Diagram = memo(function Diagram({
   elements,
   selectedIds = [],
   guides = [],
@@ -577,13 +577,23 @@ export function Diagram({
       width="100%"
       height="100%"
       role="img"
-      aria-label="Architecture drawing"
+      aria-label={onPointerDown ? "Architecture drawing canvas" : "Architecture drawing preview"}
+      aria-describedby={onPointerDown ? "canvas-keyboard-help" : undefined}
+      aria-keyshortcuts={onPointerDown ? "V R T O A P E Delete Control+Z Control+Shift+Z" : undefined}
+      tabIndex={onPointerDown ? 0 : undefined}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
       style={{ touchAction: "none", fontFamily: "Arial, sans-serif" }}
     >
+      <title>{onPointerDown ? "Architecture drawing canvas" : "Architecture drawing preview"}</title>
+      {onPointerDown && (
+        <desc id="canvas-keyboard-help">
+          Use the layer list to select objects. Keyboard shortcuts switch tools,
+          and Delete removes the current selection.
+        </desc>
+      )}
       <defs>
         {visibleElements
           .filter((element) => element.overflow === "hidden")
@@ -619,6 +629,8 @@ export function Diagram({
               <g
                 key={e.id}
                 data-element={e.id}
+                role="img"
+                aria-label={`${e.kind}: ${e.text || "untitled connector"}`}
                 onDoubleClick={() => onTextDoubleClick?.(e.id)}
                 style={{ cursor: onPointerDown ? "move" : undefined }}
               >
@@ -672,7 +684,7 @@ export function Diagram({
                   </g>
                 )}
                 {selectedIds.length === 1 && selected.has(e.id) && (
-                  <g data-selection="true">
+                  <g data-selection="true" aria-hidden="true">
                     <path
                       d={path}
                       fill="none"
@@ -733,6 +745,8 @@ export function Diagram({
           key={e.id}
           data-element={e.id}
           data-anchor-element={e.kind !== "pen" ? e.id : undefined}
+          role="img"
+          aria-label={`${e.kind}: ${e.text || "untitled element"}`}
           transform={`translate(${e.x} ${e.y}) rotate(${e.rotation || 0} ${e.w / 2} ${e.h / 2})`}
           style={{ cursor: onPointerDown ? "move" : undefined }}
           onDoubleClick={() => onTextDoubleClick?.(e.id)}
@@ -849,7 +863,7 @@ export function Diagram({
           )}
           </g>
           {selectedIds.length === 1 && selected.has(e.id) && (
-            <g data-selection="true">
+            <g data-selection="true" aria-hidden="true">
               <rect
                 x={Math.min(0, e.w) - 4}
                 y={Math.min(0, e.h) - 4}
@@ -928,8 +942,7 @@ export function Diagram({
                   strokeWidth="2"
                   data-anchor-handle={`${element.id}:${side}`}
                   data-anchor-element={element.id}
-                  role="button"
-                  aria-label={`${side} anchor for ${element.text || element.kind}`}
+                  aria-hidden="true"
                   pointerEvents="all"
                   style={{ cursor: "crosshair" }}
                 />
@@ -939,6 +952,7 @@ export function Diagram({
       {selectedIds.length > 1 && selectedBounds && (
         <rect
           data-selection="true"
+          aria-hidden="true"
           x={selectedBounds.x - 8}
           y={selectedBounds.y - 8}
           width={selectedBounds.w + 16}
@@ -955,6 +969,7 @@ export function Diagram({
           <line
             key={index}
             data-selection="true"
+            aria-hidden="true"
             x1={guide.position}
             y1="0"
             x2={guide.position}
@@ -967,6 +982,7 @@ export function Diagram({
           <line
             key={index}
             data-selection="true"
+            aria-hidden="true"
             x1="0"
             y1={guide.position}
             x2="1400"
@@ -980,6 +996,7 @@ export function Diagram({
       {selectionBox && (
         <rect
           data-selection="true"
+          aria-hidden="true"
           x={selectionBox.x}
           y={selectionBox.y}
           width={selectionBox.w}
@@ -992,4 +1009,4 @@ export function Diagram({
       )}
     </svg>
   );
-}
+});

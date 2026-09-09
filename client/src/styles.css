@@ -283,6 +283,7 @@ small {
   align-items: center;
   padding: 0 28px;
   gap: 35px;
+  min-width: 0;
 }
 .breadcrumb {
   display: flex;
@@ -305,6 +306,7 @@ small {
   display: flex;
   align-items: center;
   gap: 20px;
+  min-width: 0;
 }
 .avatar {
   width: 32px;
@@ -529,6 +531,8 @@ small {
   overflow: hidden;
   background: #fff;
   min-width: 0;
+  content-visibility: auto;
+  contain-intrinsic-size: 280px 280px;
 }
 .drawing-card:hover {
   box-shadow: 0 5px 20px #30422d0d;
@@ -539,6 +543,7 @@ small {
   background: #eef1e9;
   padding: 18px;
   position: relative;
+  contain: layout paint;
 }
 .thumbnail svg {
   background: white;

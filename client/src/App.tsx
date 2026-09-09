@@ -727,6 +727,7 @@ export default function App() {
         screen !== "editor" ||
         modal ||
         reauthOpen ||
+        exportOpen ||
         (e.target instanceof HTMLElement &&
           /INPUT|TEXTAREA|SELECT/.test(e.target.tagName))
       )
@@ -1792,11 +1793,18 @@ export default function App() {
     );
   return (
     <div className="app">
+      <div
+        className="app-content"
+        inert={modal || reauthOpen || exportOpen || undefined}
+        aria-hidden={modal || reauthOpen || exportOpen || undefined}
+      >
       <header className="topbar">
         <Brand />
         <div className="breadcrumb">
           <span>/</span>
           <button
+            type="button"
+            aria-current={screen === "library" ? "page" : undefined}
             onClick={() => {
               void goToLibrary();
             }}
@@ -1828,10 +1836,14 @@ export default function App() {
                 <i className="status-dot" />
                 {status}
               </span>
-              <button className="export-png" onClick={() => setExportOpen(true)}>
+              <button
+                type="button"
+                className="export-png"
+                onClick={() => setExportOpen(true)}
+              >
                 Export ↗
               </button>
-              <button onClick={() => importInput.current?.click()}>
+              <button type="button" onClick={() => importInput.current?.click()}>
                 Import JSON
               </button>
               <input
@@ -1844,6 +1856,7 @@ export default function App() {
             </>
           )}
           <button
+            type="button"
             className="avatar"
             title={`Sign out ${user?.name}`}
             onClick={() => void logout()}
@@ -1960,6 +1973,7 @@ export default function App() {
           />
         )
       )}
+      </div>
       <ExportDialog
         open={exportOpen}
         hasSelection={selectedIds.length > 0}

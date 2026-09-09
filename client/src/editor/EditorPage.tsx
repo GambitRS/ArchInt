@@ -170,8 +170,8 @@ export function EditorPage({
           </button>
         </div>
       </div>
-      <main className="editor-layout">
-        <aside className="tools-panel">
+      <main className="editor-layout" aria-label="Drawing editor">
+        <aside className="tools-panel" aria-label="Drawing tools">
           <div className="eyebrow">CREATE</div>
           <div className="tools">
             {(
@@ -218,7 +218,10 @@ export function EditorPage({
             </p>
           </div>
         </aside>
-        <section className={"canvas-workspace" + (grid ? " dotted" : "")}>
+        <section
+          className={"canvas-workspace" + (grid ? " dotted" : "")}
+          aria-label="Drawing canvas"
+        >
           <div className="canvas-label">
             PAGE 01 <span>/</span> {drawing.name}
           </div>
@@ -266,7 +269,7 @@ export function EditorPage({
             </div>
           </div>
         </section>
-        <aside className="properties">
+        <aside className="properties" aria-label="Properties and layers">
           <div className="row between">
             <h3>
               {element

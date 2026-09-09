@@ -33,7 +33,7 @@ export function DrawingLibrary({
 
   return (
     <div className="library-layout">
-      <aside className="library-nav">
+      <aside className="library-nav" aria-label="Workspace navigation">
         <div className="workspace-label">
           <span className="workspace-icon">
             {user.name.charAt(0).toUpperCase()}
@@ -46,9 +46,11 @@ export function DrawingLibrary({
         <div className="nav-section">WORKSPACE</div>
         {filters.map((option, index) => (
           <button
+            type="button"
             key={option}
             onClick={() => onFilterChange(option)}
             className={filter === option ? "nav-item active" : "nav-item"}
+            aria-current={filter === option ? "page" : undefined}
           >
             <span>{["▪", "▧", "◇"][index]}</span>
             {option}
@@ -125,8 +127,10 @@ export function DrawingLibrary({
         <div className="drawing-grid">
           {visible.map((drawing) => (
             <button
+              type="button"
               className="drawing-card"
               key={drawing.id}
+              aria-label={`Open drawing ${drawing.name || "Untitled drawing"}`}
               onClick={() => onOpen(drawing)}
             >
               <div className="thumbnail">
