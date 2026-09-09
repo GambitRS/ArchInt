@@ -22,9 +22,9 @@ The interface is implemented as a working first slice, not static screenshots. T
 | Editor          | Selection, dragging, cards, containers, text, ellipse, freehand strokes, bound straight/orthogonal connectors, labels, arrowheads, draggable endpoints/waypoints, vector icons, resize/rotate handles, multi-selection, marquee selection, snapping guides | Image import and asset library |
 | Properties      | Label, card description, fill, stroke, font size, dimensions, rotation, wrapping, alignment, font weight, line height, overflow, and stroke width | Opacity, corner radius, richer text editing |
 | Organization    | Layer selection, groups/ungroups, container-bound movement, lock/hide, clipboard duplication, arbitrary layer ordering, alignment, and distribution | Nested containers and richer group transforms |
-| History         | Undo/redo of element edits, grouped drag/resize/rotate/erase gestures, and coalesced text edits | Persisted recovery history |
-| Save            | Debounced, serialized saves to SQLite with revision conflict detection                                           | Reauthentication without losing an unsaved draft, offline recovery, revision history           |
-| Export          | SVG and 2× PNG of the page, excluding selection adornments                                                       | PDF, selected-area export, dimensions/background choices, font embedding                       |
+| History         | Undo/redo of element edits, grouped drag/resize/rotate/erase gestures, and coalesced text edits | Revision history |
+| Save            | Debounced, serialized saves to SQLite with revision conflict detection; per-user browser recovery drafts | Reauthentication without losing an unsaved draft, offline recovery, revision history |
+| Export          | SVG, PNG at 1×/2×/4×, raster PDF, and versioned JSON documents with page/selection bounds and background choices | Server-side export only if deployment requires it |
 | Layout          | Desktop three-column editor; stacked properties on narrow displays; responsive login/library                     | Full keyboard canvas navigation and dedicated tablet touch UX                                  |
 
 Current constraints are intentional and should remain visible to developers: page size is fixed at 1400 × 900; container children move with their parent but do not scale with a resize; unbound connectors retain absolute endpoints while named anchors follow their nodes; freehand dimensions do not rescale stroke points; the icon tool inserts an editable vector icon; multi-selection does not yet resize as a single transformed group. Image import remains deferred until asset authorization, size limits, validation, and export behavior are specified. The library initially contains no fabricated saved drawings. A user can create an architecture template from the banner.
@@ -165,7 +165,7 @@ Add indexes on `Drawing(userId, updatedAt)` and session expiry through a tested 
 
 Current behavior: a committed edit marks a drawing dirty; a 700 ms debounce batches changes; one save runs at a time. Pending updates for the same document coalesce; the next save uses the most recently acknowledged server revision. Failed saves remain pending. Before unload, warn if changes or a gesture are unsaved. Signing out waits for successful saves.
 
-Next steps: explicit conflict UI with export/copy/reload choices; session renewal that retains editor state; IndexedDB recovery snapshots scoped to the user; bounded retry/backoff for transient failures; cancellation and progress states for large documents. A 409 conflict must never be automatically overwritten or retried with a guessed revision. Keep retryable network failures distinct from authorization, validation, and conflict failures.
+Next steps: explicit conflict UI with export/copy/reload choices; session renewal that retains editor state; bounded retry/backoff for transient failures; cancellation and progress states for large documents. A 409 conflict must never be automatically overwritten or retried with a guessed revision. Keep retryable network failures distinct from authorization, validation, and conflict failures.
 
 ## 6. API contracts
 
@@ -211,6 +211,8 @@ Status: implemented in the current editor slice. Image upload is intentionally d
 Add an export dialog for format, scale, page/selection bounds, and background. Verify SVG/PDF font handling and use safe inline assets. Support PNG at 1×/2×/4× with pixel limits to prevent memory spikes. Add JSON import/export with schema version validation, plus per-user recovery drafts. Thumbnail generation must not include selection overlays or editor chrome.
 
 Acceptance: PNG/SVG/PDF match the editable canvas at the selected bounds; long text and icons remain intact; imported documents migrate safely; recovery is offered after a failed save or interrupted session.
+
+Status: implemented with a bounded export dialog, selection-aware SVG/PNG/PDF output, strict versioned JSON import/export, and per-user local recovery drafts. Export clones strip editor adornments and the page background is configurable for raster/vector output; PDF uses a white raster page for predictable printing.
 
 ### Phase 5 — Production authentication and delivery
 

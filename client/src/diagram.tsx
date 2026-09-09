@@ -596,7 +596,12 @@ export function Diagram({
             </clipPath>
           ))}
       </defs>
-      <rect width="1400" height="900" fill="white" />
+      <rect
+        data-page-background="true"
+        width="1400"
+        height="900"
+        fill="white"
+      />
       <g data-connectors="true">
         {visibleElements
           .filter((element) => element.kind === "arrow")

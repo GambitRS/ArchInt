@@ -1,12 +1,18 @@
 import { useEffect, useRef, useState } from "react";
-import type { PointerEvent } from "react";
+import type { ChangeEvent, PointerEvent } from "react";
 import { LoginPage } from "./auth/LoginPage";
 import { ReauthenticationDialog } from "./auth/ReauthenticationDialog";
 import { ApiError, api, messageForError } from "./api";
 import { Brand } from "./components/Brand";
 import { EditorPage } from "./editor/EditorPage";
+import {
+  ExportDialog,
+  type ExportOptions,
+} from "./editor/ExportDialog";
+import { parseDocumentJson, serializeDocument } from "./editor/document";
 import { CreateDrawingDialog } from "./library/CreateDrawingDialog";
 import { DrawingLibrary } from "./library/DrawingLibrary";
+import { buildPdfFromJpeg } from "./editor/pdf";
 import type { SaveIssue, Screen, Template, User } from "./app/types";
 import {
   anchorForPoint,
@@ -70,7 +76,10 @@ export default function App() {
   const [template, setTemplate] = useState<Template>("blank");
   const [guides, setGuides] = useState<SnapGuide[]>([]);
   const [selectionBox, setSelectionBox] = useState<Bounds | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [recoveryDraft, setRecoveryDraft] = useState<Drawing | null>(null);
   const svg = useRef<SVGSVGElement>(null);
+  const importInput = useRef<HTMLInputElement>(null);
   const drag = useRef<{
     id: string;
     x: number;
@@ -123,6 +132,7 @@ export default function App() {
   const revisions = useRef(new Map<string, number>());
   const saving = useRef<Promise<boolean> | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const recoveryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const createRequest = useRef<Promise<void> | null>(null);
   const createIdempotencyKey = useRef<string | null>(null);
   const drawing = drawings.find((d) => d.id === current);
@@ -187,6 +197,59 @@ export default function App() {
     }
     return { kind: "error", message: messageForError(error) };
   }
+  function recoveryKey(userId: number, drawingId: string) {
+    return `archint:recovery:${userId}:${drawingId}`;
+  }
+  function writeRecoveryDraft(d: Drawing) {
+    if (!user) return;
+    try {
+      localStorage.setItem(
+        recoveryKey(user.id, d.id),
+        JSON.stringify({
+          version: 1,
+          savedAt: new Date().toISOString(),
+          drawing: d,
+        }),
+      );
+    } catch {
+      // Recovery is best-effort when storage is unavailable or full.
+    }
+  }
+  function clearRecoveryDraft(drawingId: string, userId = user?.id) {
+    if (userId === undefined) return;
+    try {
+      localStorage.removeItem(recoveryKey(userId, drawingId));
+    } catch {
+      // Ignore storage failures; saving the server copy remains authoritative.
+    }
+  }
+  function readRecoveryDraft(d: Drawing): Drawing | null {
+    if (!user) return null;
+    try {
+      const raw = localStorage.getItem(recoveryKey(user.id, d.id));
+      if (!raw) return null;
+      const value = JSON.parse(raw) as {
+        version?: unknown;
+        drawing?: unknown;
+      };
+      if (value.version !== 1 || !value.drawing || typeof value.drawing !== "object") {
+        return null;
+      }
+      const candidate = value.drawing as Drawing;
+      if (
+        candidate.id !== d.id ||
+        typeof candidate.name !== "string" ||
+        typeof candidate.category !== "string" ||
+        typeof candidate.updated !== "string" ||
+        !Array.isArray(candidate.elements)
+      ) {
+        return null;
+      }
+      return candidate;
+    } catch {
+      return null;
+    }
+  }
   async function flush(): Promise<boolean> {
     if (saving.current) return saving.current;
     if (timer.current) {
@@ -210,6 +273,7 @@ export default function App() {
           revisions.current.set(id, saved.revision);
           if (pending.current.get(id) === d) {
             pending.current.delete(id);
+            clearRecoveryDraft(id);
             setDrawings((ds) =>
               ds.map((n) =>
                 n.id === id
@@ -226,6 +290,10 @@ export default function App() {
             );
           }
         } catch (e) {
+          if (screen === "editor" && user) {
+            writeRecoveryDraft(d);
+            if (current === id) setRecoveryDraft(d);
+          }
           setStatus("Changes not saved");
           setSaveIssue(saveIssueFor(e));
           return false;
@@ -252,6 +320,13 @@ export default function App() {
     }
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => void flush(), 700);
+    if (user && screen === "editor") {
+      if (recoveryTimer.current) clearTimeout(recoveryTimer.current);
+      recoveryTimer.current = setTimeout(() => {
+        const latest = pending.current.get(d.id);
+        if (latest) writeRecoveryDraft(latest);
+      }, 800);
+    }
   }
   useEffect(() => {
     const unload = (e: BeforeUnloadEvent) => {
@@ -264,13 +339,14 @@ export default function App() {
         eraser.current ||
         connectorDrag.current
       ) {
+        if (drawing && user) writeRecoveryDraft(drawing);
         e.preventDefault();
         e.returnValue = "";
       }
     };
     window.addEventListener("beforeunload", unload);
     return () => window.removeEventListener("beforeunload", unload);
-  }, []);
+  }, [drawing, screen, user]);
   useEffect(() => {
     const retryPendingSave = () => {
       if (pending.current.size) void flush();
@@ -732,6 +808,12 @@ export default function App() {
     };
   }, [screen]);
   function open(d: Drawing) {
+    const candidate = readRecoveryDraft(d);
+    setRecoveryDraft(
+      candidate && Date.parse(candidate.updated) > Date.parse(d.updated)
+        ? candidate
+        : null,
+    );
     setCurrent(d.id);
     setScreen("editor");
     editBaseline.current = null;
@@ -822,6 +904,7 @@ export default function App() {
         return;
       }
       pending.current.delete(id);
+      clearRecoveryDraft(id);
       if (!pending.current.size && timer.current) {
         clearTimeout(timer.current);
         timer.current = null;
@@ -1502,48 +1585,177 @@ export default function App() {
   function moveBackward() {
     reorderSelection("backward");
   }
-  function download(format: "svg" | "png" = "svg") {
-    if (!svg.current || !drawing) return;
-    const clone = svg.current.cloneNode(true) as SVGSVGElement;
-    clone.querySelectorAll("[data-selection]").forEach((n) => n.remove());
-    clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
-    clone.setAttribute("width", "1400");
-    clone.setAttribute("height", "900");
-    clone.style.cssText = "background:white;font-family:Arial,sans-serif";
-    const url = URL.createObjectURL(
-      new Blob([new XMLSerializer().serializeToString(clone)], {
-        type: "image/svg+xml",
-      }),
-    );
-    const a = document.createElement("a");
-    a.download = `${drawing.name.replace(/[^a-z0-9 _-]/gi, "") || "drawing"}.${format}`;
-    if (format === "svg") {
-      a.href = url;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-    } else {
-      const image = new Image();
-      image.onload = () => {
-        const canvas = document.createElement("canvas");
-        canvas.width = 2800;
-        canvas.height = 1800;
-        const context = canvas.getContext("2d");
-        if (!context) {
-          setError("Could not export PNG. Please try SVG.");
-          URL.revokeObjectURL(url);
-          return;
-        }
-        context.drawImage(image, 0, 0, canvas.width, canvas.height);
-        a.href = canvas.toDataURL("image/png");
-        a.click();
-        URL.revokeObjectURL(url);
-      };
-      image.onerror = () => {
-        URL.revokeObjectURL(url);
-        setError("Could not export PNG. Please try SVG.");
-      };
-      image.src = url;
+  function downloadBlob(blob: Blob, filename: string) {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  function blobFromDataUrl(dataUrl: string, type: string): Blob {
+    const comma = dataUrl.indexOf(",");
+    if (comma < 0) throw new Error("The raster export is missing image data.");
+    const binary = atob(dataUrl.slice(comma + 1));
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index);
     }
+    return new Blob([bytes], { type });
+  }
+  async function exportDrawing(options: ExportOptions) {
+    if (!svg.current || !drawing) return;
+    const baseName = drawing.name.replace(/[^a-z0-9 _-]/gi, "").trim() || "drawing";
+    if (options.format === "json") {
+      downloadBlob(
+        new Blob([serializeDocument(drawing)], { type: "application/json" }),
+        `${baseName}.json`,
+      );
+      setExportOpen(false);
+      return;
+    }
+
+    const page = { x: 0, y: 0, w: 1400, h: 900 };
+    const selectedBounds =
+      options.bounds === "selection"
+        ? boundsForElements(drawing.elements, selectedIds)
+        : null;
+    const raw = selectedBounds || page;
+    const margin = selectedBounds ? 24 : 0;
+    const x = Math.max(page.x, raw.x - margin);
+    const y = Math.max(page.y, raw.y - margin);
+    const right = Math.min(page.x + page.w, raw.x + raw.w + margin);
+    const bottom = Math.min(page.y + page.h, raw.y + raw.h + margin);
+    const crop = {
+      x,
+      y,
+      w: Math.max(1, right - x),
+      h: Math.max(1, bottom - y),
+    };
+    const pixelWidth = Math.max(1, Math.round(crop.w * options.scale));
+    const pixelHeight = Math.max(1, Math.round(crop.h * options.scale));
+    if (pixelWidth * pixelHeight > 32_000_000) {
+      setError("This export is too large. Choose a smaller scale or selection.");
+      return;
+    }
+
+    const clone = svg.current.cloneNode(true) as SVGSVGElement;
+    clone
+      .querySelectorAll(
+        "[data-selection],[data-anchor-handle],[data-connector-handle],[data-rotate-handle],[data-resize-handle]",
+      )
+      .forEach((node) => node.remove());
+    clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    clone.setAttribute("viewBox", `${crop.x} ${crop.y} ${crop.w} ${crop.h}`);
+    clone.setAttribute("width", String(pixelWidth));
+    clone.setAttribute("height", String(pixelHeight));
+    const whiteBackground =
+      options.format === "pdf" || options.background === "white";
+    const background = clone.querySelector("[data-page-background]");
+    if (background instanceof SVGElement) {
+      if (whiteBackground) background.setAttribute("fill", "#ffffff");
+      else background.remove();
+    }
+    clone.style.cssText = `background:${whiteBackground ? "white" : "transparent"};font-family:Arial,sans-serif`;
+    const serialized = new XMLSerializer().serializeToString(clone);
+    if (options.format === "svg") {
+      downloadBlob(
+        new Blob([serialized], { type: "image/svg+xml;charset=utf-8" }),
+        `${baseName}.svg`,
+      );
+      setExportOpen(false);
+      return;
+    }
+
+    const url = URL.createObjectURL(new Blob([serialized], { type: "image/svg+xml" }));
+    try {
+      const image = new Image();
+      await new Promise<void>((resolve, reject) => {
+        image.onload = () => resolve();
+        image.onerror = () => reject(new Error("The drawing could not be rasterized."));
+        image.src = url;
+      });
+      const canvas = document.createElement("canvas");
+      canvas.width = pixelWidth;
+      canvas.height = pixelHeight;
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("The browser could not create an export canvas.");
+      if (whiteBackground) {
+        context.fillStyle = "#ffffff";
+        context.fillRect(0, 0, pixelWidth, pixelHeight);
+      }
+      context.drawImage(image, 0, 0, pixelWidth, pixelHeight);
+      if (options.format === "pdf") {
+        downloadBlob(
+          buildPdfFromJpeg(
+            canvas.toDataURL("image/jpeg", 0.92),
+            pixelWidth,
+            pixelHeight,
+          ),
+          `${baseName}.pdf`,
+        );
+      } else {
+        downloadBlob(
+          blobFromDataUrl(canvas.toDataURL("image/png"), "image/png"),
+          `${baseName}.png`,
+        );
+      }
+      setExportOpen(false);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Could not export drawing.");
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+  async function importJson(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = "";
+    if (!file || !drawing) return;
+    if (file.size > 5 * 1024 * 1024) {
+      setError("This JSON document is larger than the 5 MB import limit.");
+      return;
+    }
+    try {
+      const imported = parseDocumentJson(await file.text());
+      setHistory((h) => [...h.slice(-49), structuredClone(drawing.elements)]);
+      setFuture([]);
+      setSelectedIds([]);
+      commit({
+        ...drawing,
+        name: imported.name || drawing.name,
+        category: imported.category || drawing.category,
+        elements: imported.elements,
+        updated: new Date().toISOString(),
+      });
+      setError("");
+    } catch (error) {
+      setError(
+        `JSON import rejected: ${
+          error instanceof Error ? error.message : "invalid document"
+        }`,
+      );
+    }
+  }
+  function restoreRecovery() {
+    if (!drawing || !recoveryDraft || recoveryDraft.id !== drawing.id) return;
+    setHistory((h) => [...h.slice(-49), structuredClone(drawing.elements)]);
+    setFuture([]);
+    setSelectedIds([]);
+    setRecoveryDraft(null);
+    commit({
+      ...drawing,
+      name: recoveryDraft.name,
+      category: recoveryDraft.category,
+      elements: recoveryDraft.elements,
+      updated: new Date().toISOString(),
+    });
+  }
+  function discardRecovery() {
+    if (!drawing) return;
+    clearRecoveryDraft(drawing.id);
+    setRecoveryDraft(null);
   }
   if (initializing)
     return (
@@ -1616,12 +1828,19 @@ export default function App() {
                 <i className="status-dot" />
                 {status}
               </span>
-              <button className="export-png" onClick={() => download("png")}>
-                PNG ↓
+              <button className="export-png" onClick={() => setExportOpen(true)}>
+                Export ↗
               </button>
-              <button className="primary" onClick={() => download("svg")}>
-                Export SVG ↗
+              <button onClick={() => importInput.current?.click()}>
+                Import JSON
               </button>
+              <input
+                ref={importInput}
+                type="file"
+                accept="application/json,.json"
+                hidden
+                onChange={(event) => void importJson(event)}
+              />
             </>
           )}
           <button
@@ -1641,7 +1860,7 @@ export default function App() {
           )}
           {saveIssue?.kind === "conflict" && (
             <>
-              <button onClick={() => download("svg")}>Export draft</button>
+              <button onClick={() => setExportOpen(true)}>Export draft</button>
               <button disabled={busy} onClick={() => void reloadSavedCopy()}>
                 Reload saved copy
               </button>
@@ -1667,6 +1886,13 @@ export default function App() {
           >
             ×
           </button>
+        </div>
+      )}
+      {recoveryDraft && screen === "editor" && drawing && (
+        <div className="recovery-bar" role="status">
+          <span>Unsaved changes from an interrupted session were found.</span>
+          <button onClick={restoreRecovery}>Restore draft</button>
+          <button onClick={discardRecovery}>Discard</button>
         </div>
       )}
       {screen === "library" && user ? (
@@ -1734,6 +1960,12 @@ export default function App() {
           />
         )
       )}
+      <ExportDialog
+        open={exportOpen}
+        hasSelection={selectedIds.length > 0}
+        onClose={() => setExportOpen(false)}
+        onExport={(options) => void exportDrawing(options)}
+      />
       <CreateDrawingDialog
         open={modal}
         busy={busy}
