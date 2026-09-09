@@ -1,6 +1,6 @@
 const path = require("node:path");
 const express = require("express");
-const { hashPassword } = require("./password");
+const { hashPassword, validPassword } = require("./password");
 const { mountWorkspace } = require("./workspace");
 const USER_ROLES = new Set(["admin", "user"]);
 const PUBLIC_DIRECTORY = path.resolve(__dirname, "..", "public");
@@ -33,8 +33,26 @@ function validateUserInput(body) {
 
   const { name, email, password } = body;
   const role = body.role === undefined ? "user" : body.role;
-  if ([name, email, password].some((value) => typeof value !== "string" || value.trim() === "")) {
-    const error = new Error("name, email, and password are required strings");
+  if (
+    typeof name !== "string" ||
+    name.trim() === "" ||
+    name.trim().length > 100
+  ) {
+    const error = new Error("name is required and must be at most 100 characters");
+    error.status = 400;
+    throw error;
+  }
+  if (
+    typeof email !== "string" ||
+    email.trim().length > 254 ||
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
+  ) {
+    const error = new Error("email must be a valid email address");
+    error.status = 400;
+    throw error;
+  }
+  if (!validPassword(password)) {
+    const error = new Error("password must be between 12 and 1024 characters");
     error.status = 400;
     throw error;
   }
@@ -55,7 +73,47 @@ function validateUserInput(body) {
 function createApp(db) {
   const app = express();
 
-  app.use(express.json({ limit: '5mb' }));
+  const production = process.env.NODE_ENV === "production";
+  app.disable("x-powered-by");
+  app.use((_request, response, next) => {
+    response.setHeader("X-Content-Type-Options", "nosniff");
+    response.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    response.setHeader("X-Frame-Options", "DENY");
+    response.setHeader(
+      "Permissions-Policy",
+      "camera=(), microphone=(), geolocation=()",
+    );
+    response.setHeader(
+      "Content-Security-Policy",
+      "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob:; connect-src 'self'; form-action 'self'",
+    );
+    if (production) {
+      response.setHeader(
+        "Strict-Transport-Security",
+        "max-age=31536000; includeSubDomains",
+      );
+    }
+    next();
+  });
+  app.use((request, response, next) => {
+    const started = process.hrtime.bigint();
+    response.on("finish", () => {
+      const durationMs = Number(process.hrtime.bigint() - started) / 1e6;
+      if (response.statusCode >= 500 || durationMs >= 1000) {
+        console.warn(
+          JSON.stringify({
+            event: "http_request",
+            method: request.method,
+            path: request.path,
+            status: response.statusCode,
+            durationMs: Math.round(durationMs),
+          }),
+        );
+      }
+    });
+    next();
+  });
+  app.use(express.json({ limit: "5mb", strict: true }));
   mountWorkspace(app, db);
   app.use(express.static(PUBLIC_DIRECTORY));
 
@@ -72,6 +130,18 @@ function createApp(db) {
       },
     });
   });
+
+  const requireAdmin = (request, response, next) => {
+    const user = app.locals.workspaceSessionUser(request);
+    if (!user) return response.status(401).json({ error: "Please sign in" });
+    if (user.role !== "admin") {
+      return response.status(403).json({ error: "Administrator access required" });
+    }
+    response.setHeader("Cache-Control", "no-store");
+    request.workspaceAdmin = user;
+    next();
+  };
+  app.use("/api/users", requireAdmin);
 
   app.get("/api/users", (_request, response) => {
     const users = db
@@ -135,4 +205,5 @@ function createApp(db) {
 module.exports = {
   createApp,
   hashPassword,
+  validateUserInput,
 };

@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "description": "Database specification for the Hello World API",
   "tables": [
     {
@@ -45,6 +45,16 @@
       ]
     },
     {
+      "name": "PasswordReset",
+      "columns": [
+        { "name": "id", "type": "TEXT", "primaryKey": true },
+        { "name": "userId", "type": "INTEGER", "notNull": true },
+        { "name": "tokenHash", "type": "TEXT", "notNull": true, "unique": true },
+        { "name": "expiresAt", "type": "INTEGER", "notNull": true },
+        { "name": "usedAt", "type": "INTEGER" }
+      ]
+    },
+    {
       "name": "Drawing",
       "columns": [
         { "name": "id", "type": "TEXT", "primaryKey": true },
@@ -70,6 +80,11 @@
   "relations": [
     {
       "from": { "table": "Session", "column": "userId" },
+      "to": { "table": "User", "column": "id" },
+      "onDelete": "CASCADE"
+    },
+    {
+      "from": { "table": "PasswordReset", "column": "userId" },
       "to": { "table": "User", "column": "id" },
       "onDelete": "CASCADE"
     },

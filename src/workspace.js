@@ -1,5 +1,6 @@
 const crypto = require("node:crypto");
 const { promisify } = require("node:util");
+const { hashPassword, validPassword, verifyPassword } = require("./password");
 const scrypt = promisify(crypto.scrypt);
 const hash = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const lifetime = 7 * 24 * 60 * 60 * 1000;
@@ -138,8 +139,11 @@ function validDocument(d) {
 
 function mountWorkspace(app, db) {
   const failures = new Map();
+  let lastSessionCleanup = 0;
   const cookie = (token) =>
     `archint_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${lifetime / 1000}${process.env.NODE_ENV === "production" ? "; Secure" : ""}`;
+  const clearCookie =
+    "archint_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0";
   const tokenOf = (req) =>
     (req.headers.cookie || "")
       .split(";")
@@ -147,14 +151,20 @@ function mountWorkspace(app, db) {
       .find((s) => s.startsWith("archint_session="))
       ?.slice(16) || "";
   const sessionUser = (req) => {
+    const now = Date.now();
+    if (now - lastSessionCleanup > 60_000) {
+      db.prepare("DELETE FROM Session WHERE expiresAt <= ?").run(now);
+      lastSessionCleanup = now;
+    }
     const token = tokenOf(req);
     if (!token) return undefined;
     return db
       .prepare(
         "SELECT u.* FROM User u JOIN Session s ON s.userId=u.id WHERE s.tokenHash=? AND s.expiresAt>?",
       )
-      .get(hash(token), Date.now());
+      .get(hash(token), now);
   };
+  app.locals.workspaceSessionUser = sessionUser;
   app.use("/api", (req, res, next) => {
     if (
       ["POST", "PUT", "DELETE", "PATCH"].includes(req.method) &&
@@ -234,11 +244,106 @@ function mountWorkspace(app, db) {
   });
   app.post("/api/auth/logout", (req, res) => {
     db.prepare("DELETE FROM Session WHERE tokenHash=?").run(hash(tokenOf(req)));
-    res.setHeader(
-      "Set-Cookie",
-      "archint_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0",
-    );
+    res.setHeader("Set-Cookie", clearCookie);
     res.json({ data: true });
+  });
+  app.post("/api/auth/password", (req, res) => {
+    const user = sessionUser(req);
+    if (!user) {
+      return res
+        .status(401)
+        .json({ error: "Your session ended. Please sign in again." });
+    }
+    const { currentPassword, newPassword } = req.body || {};
+    if (
+      typeof currentPassword !== "string" ||
+      currentPassword.length === 0 ||
+      currentPassword.length > 1024 ||
+      !validPassword(newPassword)
+    ) {
+      return res.status(400).json({
+        error: "Current password is required and the new password must be between 12 and 1024 characters",
+      });
+    }
+    if (!verifyPassword(currentPassword, user.password)) {
+      return res.status(400).json({ error: "Current password is incorrect" });
+    }
+    db.transaction(() => {
+      db.prepare("UPDATE User SET password=? WHERE id=?").run(
+        hashPassword(newPassword),
+        user.id,
+      );
+      db.prepare("DELETE FROM Session WHERE userId=?").run(user.id);
+    })();
+    res.setHeader("Set-Cookie", clearCookie);
+    return res.json({ data: { signedOut: true } });
+  });
+  app.post("/api/auth/recovery/request", (req, res) => {
+    const email = req.body?.email;
+    if (
+      typeof email !== "string" ||
+      email.trim().length === 0 ||
+      email.trim().length > 254 ||
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
+    ) {
+      return res.status(400).json({ error: "Enter a valid email address" });
+    }
+    const user = db
+      .prepare("SELECT id FROM User WHERE email=?")
+      .get(email.trim().toLowerCase());
+    const result = { accepted: true };
+    if (user) {
+      const token = crypto.randomBytes(32).toString("hex");
+      db.transaction(() => {
+        db.prepare("DELETE FROM PasswordReset WHERE userId=? OR expiresAt <= ?").run(
+          user.id,
+          Date.now(),
+        );
+        db.prepare(
+          "INSERT INTO PasswordReset (id,userId,tokenHash,expiresAt,usedAt) VALUES (?,?,?,?,NULL)",
+        ).run(
+          crypto.randomUUID(),
+          user.id,
+          hash(token),
+          Date.now() + 30 * 60 * 1000,
+        );
+      })();
+      if (process.env.NODE_ENV !== "production") result.token = token;
+    } else {
+      db.prepare("DELETE FROM PasswordReset WHERE expiresAt <= ?").run(Date.now());
+    }
+    return res.json({ data: result });
+  });
+  app.post("/api/auth/recovery/reset", (req, res) => {
+    const { token, newPassword } = req.body || {};
+    if (
+      typeof token !== "string" ||
+      token.length < 32 ||
+      token.length > 256 ||
+      !validPassword(newPassword)
+    ) {
+      return res.status(400).json({ error: "Recovery token or new password is invalid" });
+    }
+    const reset = db
+      .prepare(
+        "SELECT * FROM PasswordReset WHERE tokenHash=? AND usedAt IS NULL AND expiresAt > ?",
+      )
+      .get(hash(token), Date.now());
+    if (!reset) {
+      return res.status(400).json({ error: "Recovery link is invalid or expired" });
+    }
+    db.transaction(() => {
+      db.prepare("UPDATE User SET password=? WHERE id=?").run(
+        hashPassword(newPassword),
+        reset.userId,
+      );
+      db.prepare("UPDATE PasswordReset SET usedAt=? WHERE id=?").run(
+        Date.now(),
+        reset.id,
+      );
+      db.prepare("DELETE FROM Session WHERE userId=?").run(reset.userId);
+    })();
+    return res.json({ data: { signedOut: true } });
   });
   app.use("/api/drawings", (req, res, next) => {
     const user = sessionUser(req);

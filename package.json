@@ -8,6 +8,7 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "build": "npm run frontend:build",
+    "db:backup": "node src/backup-database.js",
     "db:sync": "node src/sync-database.js",
     "test": "node --test",
     "frontend:dev": "vite --config client/vite.config.mts",

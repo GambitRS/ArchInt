@@ -27,6 +27,17 @@ test("seeds the default admin user only when User is empty", () => {
   db.close();
 });
 
+test("does not create development credentials in production", () => {
+  const db = new Database(":memory:");
+  db.pragma("foreign_keys = ON");
+  applySchema(db, loadSchema());
+
+  assert.equal(seedDefaultUser(db, { environment: "production" }), false);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM "User"').get().count, 0);
+
+  db.close();
+});
+
 test("keeps the development admin role when the column is added to an existing database", () => {
   const db = new Database(":memory:");
   db.pragma("foreign_keys = ON");

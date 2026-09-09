@@ -1,6 +1,9 @@
 const { hashPassword } = require("./password");
 
-function seedDefaultUser(db) {
+function seedDefaultUser(db, options = {}) {
+  const environment = options.environment ?? process.env.NODE_ENV;
+  if (environment === "production") return false;
+
   const seed = db.transaction(() => {
     const result = db.prepare('SELECT COUNT(*) AS count FROM "User"').get();
     if (Number(result.count) > 0) {

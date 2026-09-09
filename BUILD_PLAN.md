@@ -16,7 +16,7 @@ The interface is implemented as a working first slice, not static screenshots. T
 
 | Area            | Available now                                                                                                    | Remaining work                                                                                 |
 | --------------- | ---------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| Sign-in         | Existing user credentials, SQLite sessions, logout, expired-session rejection, basic login throttling            | Account onboarding, recovery, session management, deployment hardening                         |
+| Sign-in         | Existing user credentials, SQLite sessions, logout, expired-session rejection, basic login throttling, password change/recovery API | Account onboarding, delivery integration, session management, deployment hardening |
 | Drawing library | User-owned drawings, search, category filters, live SVG thumbnails, open existing drawing                        | Pagination, duplicate/archive/delete drawings, sorting, thumbnail caching                      |
 | New drawing     | Named blank canvas or editable architecture template                                                             | Template picker with more examples and previews                                                |
 | Editor          | Selection, dragging, cards, containers, text, ellipse, freehand strokes, bound straight/orthogonal connectors, labels, arrowheads, draggable endpoints/waypoints, vector icons, resize/rotate handles, multi-selection, marquee selection, snapping guides | Image import and asset library |
@@ -55,7 +55,7 @@ Fonts currently load from Google Fonts. Self-host licensed font files before an 
 
 Left side: product identity, short introduction, email and password fields, one sign-in action, validation/error feedback. Right side: an editable-diagram preview rendered as artwork with a short caption. On narrow displays, retain only the form. Support browser password managers through autocomplete attributes. Submit with Enter; disable duplicate submits while connecting. Never imply successful sign-in without a server session.
 
-Authentication requires an existing account. There is no misleading sign-up or password-reset link until those flows exist.
+Authentication requires an existing account. Password recovery is available through the secured API; a delivery-backed reset screen remains deployment-facing work until an email provider is selected.
 
 ### Screen B — Drawing library
 
@@ -174,6 +174,9 @@ Next steps: explicit conflict UI with export/copy/reload choices; session renewa
 | `POST /api/auth/login`  | Validates existing email/password; issues HttpOnly, SameSite=Strict session cookie     |
 | `GET /api/auth/me`      | Returns public user fields or 401                                                      |
 | `POST /api/auth/logout` | Revokes the server session and clears cookie                                           |
+| `POST /api/auth/password` | Verifies the current password, stores a stronger password, and revokes all sessions |
+| `POST /api/auth/recovery/request` | Creates a single-use, expiring hashed recovery token; delivery is deployment-configured |
+| `POST /api/auth/recovery/reset` | Consumes a valid recovery token, changes the password, and revokes all sessions |
 | `GET /api/drawings`     | Returns only the signed-in user's documents                                            |
 | `POST /api/drawings`    | Validates name/category/elements, assigns server UUID/owner, returns revision 1        |
 | `PUT /api/drawings/:id` | Checks ownership and expected revision; validates and atomically replaces the document |
@@ -221,6 +224,8 @@ The pre-existing `/api/users` endpoints still expose user listing and user creat
 Move login throttling to a bounded persistent/shared store if running multiple server processes, add retention cleanup for sessions, set operational request/concurrency limits, and define trusted origins/proxy settings. Use HTTPS, secure cookies, backups with tested restores, access-controlled database files, and operational error logging that excludes passwords, tokens, and drawing content. Decide on deployment infrastructure only after confirming hosting requirements; preserve Express/SQLite for the current local project.
 
 Acceptance: no public administrative writes, no development credentials in production, owner isolation across all document/asset endpoints, tested backup recovery, and useful error/latency monitoring.
+
+Status: implemented for the current local deployment with administrator-only legacy user routes, strict account input/password validation, session-revoking password changes and recovery, expiring hashed reset tokens, session retention cleanup, production seed suppression, HTTPS-origin startup validation, security headers, and integration coverage. Production email delivery and shared multi-process throttling remain deployment wiring decisions.
 
 ### Phase 6 — Accessibility, browser, and performance release gate
 
