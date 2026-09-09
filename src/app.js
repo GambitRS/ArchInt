@@ -1,6 +1,7 @@
 const path = require("node:path");
 const express = require("express");
 const { hashPassword } = require("./password");
+const { mountWorkspace } = require("./workspace");
 const USER_ROLES = new Set(["admin", "user"]);
 const PUBLIC_DIRECTORY = path.resolve(__dirname, "..", "public");
 
@@ -54,7 +55,8 @@ function validateUserInput(body) {
 function createApp(db) {
   const app = express();
 
-  app.use(express.json());
+  app.use(express.json({ limit: '5mb' }));
+  mountWorkspace(app, db);
   app.use(express.static(PUBLIC_DIRECTORY));
 
   app.get("/", (_request, response) => {

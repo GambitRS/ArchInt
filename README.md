@@ -1,5 +1,20 @@
 # Hello World API
 
+## ArchInt drawing workspace
+
+The frontend now includes sign-in, a per-user drawing library, an editable architecture
+template, structured drawing tools, freehand sketching, autosave to SQLite, and SVG/PNG export.
+See [BUILD_PLAN.md](BUILD_PLAN.md) for the UI specification, implemented scope, remaining
+features, security work before production, and acceptance criteria.
+
+Build and start using the commands below, then open `http://localhost:3000`.
+The existing development account works when it has been seeded; its credentials are listed below.
+New authenticated routes are `/api/auth/login`, `/api/auth/me`, `/api/auth/logout`, and
+`/api/drawings`. The development frontend proxies `/api` to the backend on port 3000.
+
+The legacy user-management endpoints below are still development APIs and must be
+restricted before production use. See the production phase in the build plan.
+
 A small Node.js backend using Express and SQLite.
 
 ## Run

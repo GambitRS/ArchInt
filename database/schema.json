@@ -27,10 +27,7 @@
           "type": "TEXT",
           "notNull": true,
           "default": "user",
-          "allowedValues": [
-            "admin",
-            "user"
-          ]
+          "allowedValues": ["admin", "user"]
         },
         {
           "name": "password",
@@ -38,7 +35,38 @@
           "notNull": true
         }
       ]
+    },
+    {
+      "name": "Session",
+      "columns": [
+        { "name": "tokenHash", "type": "TEXT", "primaryKey": true },
+        { "name": "userId", "type": "INTEGER", "notNull": true },
+        { "name": "expiresAt", "type": "INTEGER", "notNull": true }
+      ]
+    },
+    {
+      "name": "Drawing",
+      "columns": [
+        { "name": "id", "type": "TEXT", "primaryKey": true },
+        { "name": "userId", "type": "INTEGER", "notNull": true },
+        { "name": "name", "type": "TEXT", "notNull": true },
+        { "name": "category", "type": "TEXT", "notNull": true },
+        { "name": "document", "type": "TEXT", "notNull": true },
+        { "name": "updatedAt", "type": "TEXT", "notNull": true },
+        { "name": "revision", "type": "INTEGER", "notNull": true, "default": 1 }
+      ]
     }
   ],
-  "relations": []
+  "relations": [
+    {
+      "from": { "table": "Session", "column": "userId" },
+      "to": { "table": "User", "column": "id" },
+      "onDelete": "CASCADE"
+    },
+    {
+      "from": { "table": "Drawing", "column": "userId" },
+      "to": { "table": "User", "column": "id" },
+      "onDelete": "CASCADE"
+    }
+  ]
 }
