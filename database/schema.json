@@ -55,6 +55,16 @@
         { "name": "updatedAt", "type": "TEXT", "notNull": true },
         { "name": "revision", "type": "INTEGER", "notNull": true, "default": 1 }
       ]
+    },
+    {
+      "name": "DrawingCreation",
+      "columns": [
+        { "name": "id", "type": "TEXT", "primaryKey": true },
+        { "name": "userId", "type": "INTEGER", "notNull": true },
+        { "name": "idempotencyKey", "type": "TEXT", "notNull": true },
+        { "name": "drawingId", "type": "TEXT", "notNull": true },
+        { "name": "createdAt", "type": "TEXT", "notNull": true }
+      ]
     }
   ],
   "relations": [
@@ -66,6 +76,16 @@
     {
       "from": { "table": "Drawing", "column": "userId" },
       "to": { "table": "User", "column": "id" },
+      "onDelete": "CASCADE"
+    },
+    {
+      "from": { "table": "DrawingCreation", "column": "userId" },
+      "to": { "table": "User", "column": "id" },
+      "onDelete": "CASCADE"
+    },
+    {
+      "from": { "table": "DrawingCreation", "column": "drawingId" },
+      "to": { "table": "Drawing", "column": "id" },
       "onDelete": "CASCADE"
     }
   ]

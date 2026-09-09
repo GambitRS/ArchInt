@@ -22,12 +22,13 @@ test("sessions, drawing ownership, persistence, validation, and conflicting upda
   const server = createApp(db).listen(0, "127.0.0.1");
   await new Promise((resolve) => server.once("listening", resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
-  const request = (path, method = "GET", body, cookie) =>
+  const request = (path, method = "GET", body, cookie, extraHeaders = {}) =>
     fetch(base + path, {
       method,
       headers: {
         ...(body ? { "Content-Type": "application/json" } : {}),
         ...(cookie ? { cookie } : {}),
+        ...extraHeaders,
       },
       body: body ? JSON.stringify(body) : undefined,
     });
@@ -78,19 +79,25 @@ test("sessions, drawing ownership, persistence, validation, and conflicting upda
     const created = await request("/api/drawings", "POST", doc, cookie);
     assert.equal(created.status, 201);
     const d = (await created.json()).data;
+    const fetched = await request(`/api/drawings/${d.id}`, "GET", undefined, cookie);
+    assert.equal(fetched.status, 200);
+    assert.equal((await fetched.json()).data.id, d.id);
     const list = (
       await (await request("/api/drawings", "GET", undefined, cookie)).json()
     ).data;
     assert.equal(list.length, 1);
     assert.deepEqual(list[0].elements, doc.elements);
+    const changedElements = [{ ...d.elements[0], text: "Updated router", x: 42 }];
     const updated = await request(
       `/api/drawings/${d.id}`,
       "PUT",
-      { ...d, name: "Renamed" },
+      { ...d, name: "Renamed", elements: changedElements },
       cookie,
     );
     assert.equal(updated.status, 200);
-    assert.equal((await updated.json()).data.revision, 2);
+    const updatedData = (await updated.json()).data;
+    assert.equal(updatedData.revision, 2);
+    assert.deepEqual(updatedData.elements, changedElements);
     assert.equal(
       (await request(`/api/drawings/${d.id}`, "PUT", d, cookie)).status,
       409,
@@ -123,6 +130,11 @@ test("sessions, drawing ownership, persistence, validation, and conflicting upda
         ).json()
       ).data,
       [],
+    );
+    assert.equal(
+      (await request(`/api/drawings/${d.id}`, "GET", undefined, bobCookie))
+        .status,
+      404,
     );
     assert.equal(
       (
@@ -163,6 +175,49 @@ test("sessions, drawing ownership, persistence, validation, and conflicting upda
       ).data[0].name,
       "Renamed",
     );
+    assert.deepEqual(
+      (
+        await (
+          await request(`/api/drawings/${d.id}`, "GET", undefined, againCookie)
+        ).json()
+      ).data.elements,
+      changedElements,
+    );
+    const idempotencyKey = "create-architecture-once";
+    const idempotentBody = { ...doc, name: "   " };
+    const firstCreate = await request(
+      "/api/drawings",
+      "POST",
+      idempotentBody,
+      againCookie,
+      { "Idempotency-Key": idempotencyKey },
+    );
+    const firstCreateData = await firstCreate.json();
+    assert.equal(firstCreate.status, 201);
+    assert.equal(firstCreateData.data.name, "Untitled drawing");
+    const replay = await fetch(base + "/api/drawings", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        cookie: againCookie,
+        "Idempotency-Key": idempotencyKey,
+      },
+      body: JSON.stringify(idempotentBody),
+    });
+    assert.equal(replay.status, 200);
+    const replayData = await replay.json();
+    const keyedCreate = await fetch(base + "/api/drawings", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        cookie: againCookie,
+        "Idempotency-Key": idempotencyKey,
+      },
+      body: JSON.stringify(idempotentBody),
+    });
+    assert.equal(keyedCreate.status, 200);
+    assert.equal((await keyedCreate.json()).data.id, replayData.data.id);
+    assert.equal(replayData.data.id, firstCreateData.data.id);
     db.prepare("UPDATE Session SET expiresAt=0").run();
     assert.equal(
       (await request("/api/drawings", "GET", undefined, againCookie)).status,

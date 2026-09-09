@@ -9,8 +9,10 @@ features, security work before production, and acceptance criteria.
 
 Build and start using the commands below, then open `http://localhost:3000`.
 The existing development account works when it has been seeded; its credentials are listed below.
-New authenticated routes are `/api/auth/login`, `/api/auth/me`, `/api/auth/logout`, and
-`/api/drawings`. The development frontend proxies `/api` to the backend on port 3000.
+New authenticated routes are `/api/auth/login`, `/api/auth/me`, `/api/auth/logout`,
+`/api/drawings`, and `/api/drawings/:id`. Drawing creation accepts an `Idempotency-Key`
+header so a retried request returns the original drawing instead of creating a duplicate.
+The development frontend proxies `/api` to the backend on port 3000.
 
 The legacy user-management endpoints below are still development APIs and must be
 restricted before production use. See the production phase in the build plan.

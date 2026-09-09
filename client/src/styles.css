@@ -1008,12 +1008,38 @@ kbd {
   display: flex;
   align-items: center;
   gap: 15px;
+  flex-wrap: wrap;
+}
+.error-bar > span {
+  flex: 1 1 260px;
 }
 .error-bar button {
   border: 1px solid #dab8ac;
   border-radius: 5px;
   padding: 5px 8px;
   font-size: 11px;
+}
+.session-loading {
+  min-height: 100vh;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 22px;
+  background: #f9faf7;
+  color: #728566;
+}
+.session-loading .brand {
+  color: #283b33;
+}
+.session-loading p {
+  margin: 0;
+  font-size: 12px;
+}
+.modal-actions {
+  margin-top: 24px;
+}
+.modal-actions button:first-child {
+  color: #6d8061;
 }
 @media (min-width: 1600px) {
   .canvas-scroll {

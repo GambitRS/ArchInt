@@ -3,6 +3,14 @@ const { promisify } = require("node:util");
 const scrypt = promisify(crypto.scrypt);
 const hash = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const lifetime = 7 * 24 * 60 * 60 * 1000;
+const DEFAULT_DRAWING_NAME = "Untitled drawing";
+const MAX_IDEMPOTENCY_KEY_LENGTH = 200;
+
+function normalizeDrawingName(value) {
+  const name = typeof value === "string" ? value.trim() : "";
+  return name || DEFAULT_DRAWING_NAME;
+}
+
 const publicUser = (u) => ({
   id: u.id,
   name: u.name,
@@ -14,7 +22,6 @@ function validDocument(d) {
   if (
     !d ||
     typeof d.name !== "string" ||
-    !d.name.trim() ||
     d.name.length > 100 ||
     !["Architecture", "Diagram"].includes(d.category) ||
     !Array.isArray(d.elements) ||
@@ -177,6 +184,10 @@ function mountWorkspace(app, db) {
     elements: JSON.parse(row.document),
     revision: row.revision,
   });
+
+  const ownedDrawing = (id, userId) =>
+    db.prepare("SELECT * FROM Drawing WHERE id=? AND userId=?").get(id, userId);
+
   app.get("/api/drawings", (req, res) =>
     res.json({
       data: db
@@ -185,33 +196,72 @@ function mountWorkspace(app, db) {
         .map(serialize),
     }),
   );
-  app.post("/api/drawings", (req, res) => {
-    if (!validDocument(req.body))
-      return res
-        .status(400)
-        .json({ error: "Drawing data is invalid or too large" });
+
+  app.get("/api/drawings/:id", (req, res) => {
+    const drawing = ownedDrawing(req.params.id, req.workspaceUser.id);
+    return drawing
+      ? res.json({ data: serialize(drawing) })
+      : res.status(404).json({ error: "Drawing not found" });
+  });
+
+  const createDrawing = db.transaction((d, userId, idempotencyKey) => {
+    const requestId = idempotencyKey
+      ? hash(`${userId}:${idempotencyKey}`)
+      : null;
+    if (requestId) {
+      const previous = db
+        .prepare(
+          "SELECT drawingId FROM DrawingCreation WHERE id=? AND userId=?",
+        )
+        .get(requestId, userId);
+      if (previous) {
+        const existing = ownedDrawing(previous.drawingId, userId);
+        if (existing) return { row: existing, replayed: true };
+      }
+    }
+
     const id = crypto.randomUUID();
-    const d = req.body;
     db.prepare(
       "INSERT INTO Drawing (id,userId,name,category,document,updatedAt,revision) VALUES (?,?,?,?,?,?,1)",
     ).run(
       id,
-      req.workspaceUser.id,
-      d.name.trim(),
+      userId,
+      normalizeDrawingName(d.name),
       d.category,
       JSON.stringify(d.elements),
       new Date().toISOString(),
     );
+    if (requestId) {
+      db.prepare(
+        "INSERT INTO DrawingCreation (id,userId,idempotencyKey,drawingId,createdAt) VALUES (?,?,?,?,?)",
+      ).run(requestId, userId, idempotencyKey, id, new Date().toISOString());
+    }
+    return { row: ownedDrawing(id, userId), replayed: false };
+  });
+
+  app.post("/api/drawings", (req, res) => {
+    const rawIdempotencyKey = req.get("Idempotency-Key");
+    const idempotencyKey = rawIdempotencyKey?.trim();
+    if (
+      rawIdempotencyKey !== undefined &&
+      (!idempotencyKey || idempotencyKey.length > MAX_IDEMPOTENCY_KEY_LENGTH)
+    )
+      return res.status(400).json({ error: "Idempotency-Key is invalid" });
+    if (!validDocument(req.body))
+      return res
+        .status(400)
+        .json({ error: "Drawing data is invalid or too large" });
+    const result = createDrawing(
+      req.body,
+      req.workspaceUser.id,
+      idempotencyKey,
+    );
     res
-      .status(201)
-      .json({
-        data: serialize(db.prepare("SELECT * FROM Drawing WHERE id=?").get(id)),
-      });
+      .status(result.replayed ? 200 : 201)
+      .json({ data: serialize(result.row) });
   });
   app.put("/api/drawings/:id", (req, res) => {
-    const existing = db
-      .prepare("SELECT * FROM Drawing WHERE id=? AND userId=?")
-      .get(req.params.id, req.workspaceUser.id);
+    const existing = ownedDrawing(req.params.id, req.workspaceUser.id);
     if (!existing) return res.status(404).json({ error: "Drawing not found" });
     if (!validDocument(req.body))
       return res
@@ -228,7 +278,7 @@ function mountWorkspace(app, db) {
     db.prepare(
       "UPDATE Drawing SET name=?,category=?,document=?,updatedAt=?,revision=revision+1 WHERE id=? AND userId=?",
     ).run(
-      d.name.trim(),
+      normalizeDrawingName(d.name),
       d.category,
       JSON.stringify(d.elements),
       new Date().toISOString(),
