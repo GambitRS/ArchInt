@@ -1,0 +1,117 @@
+{
+  "language": {
+    "name": "ArchiMate",
+    "version": "4.0",
+    "specificationUrl": "https://pubs.opengroup.org/architecture/archimate4-doc/",
+    "authority": "The Open Group"
+  },
+  "nativeFormat": {
+    "id": "archint-archimate4",
+    "version": "2",
+    "fileExtension": ".archimate",
+    "mediaType": "application/vnd.archint.archimate+json",
+    "description": "ArchInt lossless ArchiMate 4.0 model and view document"
+  },
+  "exchangeFormat": {
+    "id": "open-group-exchange",
+    "versions": ["3.1", "3.2"],
+    "namespace": "http://www.opengroup.org/xsd/archimate",
+    "description": "The Open Group ArchiMate Model Exchange File Format; no official 4.0 exchange schema is assumed"
+  },
+  "domains": [
+    {
+      "id": "common",
+      "name": "Common",
+      "description": "Cross-domain behaviour, active structure, and composite concepts"
+    },
+    {
+      "id": "business",
+      "name": "Business",
+      "description": "Business-specific actors, interfaces, objects, and products"
+    },
+    {
+      "id": "application",
+      "name": "Application",
+      "description": "Software components, interfaces, and structured data"
+    },
+    {
+      "id": "technology",
+      "name": "Technology",
+      "description": "Technology and physical infrastructure"
+    },
+    {
+      "id": "strategy",
+      "name": "Strategy",
+      "description": "Resources, capabilities, value streams, and courses of action"
+    },
+    {
+      "id": "motivation",
+      "name": "Motivation",
+      "description": "The context and reasons behind the architecture"
+    },
+    {
+      "id": "implementation-migration",
+      "name": "Implementation and Migration",
+      "description": "Work packages, deliverables, and stable architecture plateaus"
+    }
+  ],
+  "elements": [
+    { "id": "Role", "name": "Role", "domain": "common", "aspect": "structure", "shape": "role", "glyph": "role", "description": "A position or purpose an active structure has in performing behaviour", "legacyAliases": ["BusinessRole", "ApplicationRole", "TechnologyRole"] },
+    { "id": "Collaboration", "name": "Collaboration", "domain": "common", "aspect": "structure", "shape": "collaboration", "glyph": "collaboration", "description": "A collection of active structure elements working together", "legacyAliases": ["BusinessCollaboration", "ApplicationCollaboration", "TechnologyCollaboration"] },
+    { "id": "Path", "name": "Path", "domain": "common", "aspect": "structure", "shape": "path", "glyph": "path", "description": "A logical link through which active structure elements exchange information, data, energy, or material", "legacyAliases": ["TechnologyPath"] },
+    { "id": "Service", "name": "Service", "domain": "common", "aspect": "behavior", "shape": "rounded-rectangle", "glyph": "service", "description": "Explicitly defined behaviour provided to an environment", "legacyAliases": ["BusinessService", "ApplicationService", "TechnologyService"] },
+    { "id": "Process", "name": "Process", "domain": "common", "aspect": "behavior", "shape": "rounded-rectangle", "glyph": "process", "description": "A sequence of behaviours that achieves a specific result", "legacyAliases": ["BusinessProcess", "ApplicationProcess", "TechnologyProcess"] },
+    { "id": "Function", "name": "Function", "domain": "common", "aspect": "behavior", "shape": "rounded-rectangle", "glyph": "function", "description": "A collection of behaviour based on chosen criteria", "legacyAliases": ["BusinessFunction", "ApplicationFunction", "TechnologyFunction"] },
+    { "id": "Event", "name": "Event", "domain": "common", "aspect": "behavior", "shape": "circle", "glyph": "event", "description": "Something that happens or occurs, such as a state change", "legacyAliases": ["BusinessEvent", "ApplicationEvent", "TechnologyEvent", "ImplementationEvent"] },
+    { "id": "Grouping", "name": "Grouping", "domain": "common", "aspect": "composite", "shape": "grouping", "glyph": "grouping", "description": "A collection of concepts that belong together", "legacyAliases": [] },
+    { "id": "Location", "name": "Location", "domain": "common", "aspect": "composite", "shape": "location", "glyph": "location", "description": "A place or position where structure can be located or behaviour performed", "legacyAliases": [] },
+    { "id": "BusinessActor", "name": "Business Actor", "domain": "business", "aspect": "structure", "shape": "role", "glyph": "business-actor", "description": "A business entity capable of performing behaviour", "legacyAliases": [] },
+    { "id": "BusinessInterface", "name": "Business Interface", "domain": "business", "aspect": "structure", "shape": "interface", "glyph": "business-interface", "description": "A point of access where a business actor makes services available", "legacyAliases": [] },
+    { "id": "BusinessObject", "name": "Business Object", "domain": "business", "aspect": "structure", "shape": "document", "glyph": "business-object", "description": "A conceptual passive element relevant from a business perspective", "legacyAliases": [] },
+    { "id": "Product", "name": "Product", "domain": "business", "aspect": "composite", "shape": "product", "glyph": "product", "description": "A coherent collection of services and passive structure offered as a whole", "legacyAliases": [] },
+    { "id": "ApplicationComponent", "name": "Application Component", "domain": "application", "aspect": "structure", "shape": "component", "glyph": "application-component", "description": "An encapsulated software unit that performs application behaviour", "legacyAliases": [] },
+    { "id": "ApplicationInterface", "name": "Application Interface", "domain": "application", "aspect": "structure", "shape": "interface", "glyph": "application-interface", "description": "A point of access where an application component exposes services", "legacyAliases": [] },
+    { "id": "DataObject", "name": "Data Object", "domain": "application", "aspect": "structure", "shape": "document", "glyph": "data-object", "description": "Data structured for automated processing", "legacyAliases": [] },
+    { "id": "Node", "name": "Node", "domain": "technology", "aspect": "structure", "shape": "node", "glyph": "node", "description": "A generic IT or physical structure that hosts or interacts with other structures", "legacyAliases": [] },
+    { "id": "Device", "name": "Device", "domain": "technology", "aspect": "structure", "shape": "device", "glyph": "device", "description": "IT hardware used for processing, data storage, or similar purposes", "legacyAliases": [] },
+    { "id": "SystemSoftware", "name": "System Software", "domain": "technology", "aspect": "structure", "shape": "component", "glyph": "system-software", "description": "Software providing an environment for storing, executing, and using software or data", "legacyAliases": [] },
+    { "id": "TechnologyInterface", "name": "Technology Interface", "domain": "technology", "aspect": "structure", "shape": "interface", "glyph": "technology-interface", "description": "A point of access where technology structure exposes services", "legacyAliases": [] },
+    { "id": "CommunicationNetwork", "name": "Communication Network", "domain": "technology", "aspect": "structure", "shape": "network", "glyph": "communication-network", "description": "IT structures for transmission, routing, and reception of data", "legacyAliases": [] },
+    { "id": "DistributionNetwork", "name": "Distribution Network", "domain": "technology", "aspect": "structure", "shape": "network", "glyph": "distribution-network", "description": "A physical network used to transport materials or energy", "legacyAliases": [] },
+    { "id": "Equipment", "name": "Equipment", "domain": "technology", "aspect": "structure", "shape": "device", "glyph": "equipment", "description": "A physical machine, tool, instrument, or livestock", "legacyAliases": [] },
+    { "id": "Facility", "name": "Facility", "domain": "technology", "aspect": "structure", "shape": "facility", "glyph": "facility", "description": "A physical structure or environment", "legacyAliases": [] },
+    { "id": "Artifact", "name": "Artifact", "domain": "technology", "aspect": "structure", "shape": "document", "glyph": "artifact", "description": "A physical piece of data used or produced in a process", "legacyAliases": [] },
+    { "id": "Material", "name": "Material", "domain": "technology", "aspect": "structure", "shape": "material", "glyph": "material", "description": "Tangible physical matter or energy", "legacyAliases": [] },
+    { "id": "Resource", "name": "Resource", "domain": "strategy", "aspect": "structure", "shape": "resource", "glyph": "resource", "description": "A useful or valuable possession or means available to the enterprise", "legacyAliases": [] },
+    { "id": "Capability", "name": "Capability", "domain": "strategy", "aspect": "behavior", "shape": "capability", "glyph": "capability", "description": "An ability an organizational entity, person, or system possesses", "legacyAliases": [] },
+    { "id": "ValueStream", "name": "Value Stream", "domain": "strategy", "aspect": "behavior", "shape": "value-stream", "glyph": "value-stream", "description": "A sequence of activities that creates an overall result for a customer or stakeholder", "legacyAliases": [] },
+    { "id": "CourseOfAction", "name": "Course of Action", "domain": "strategy", "aspect": "behavior", "shape": "course-of-action", "glyph": "course-of-action", "description": "An approach or plan for configuring capabilities and resources to achieve a goal", "legacyAliases": [] },
+    { "id": "Stakeholder", "name": "Stakeholder", "domain": "motivation", "aspect": "motivation", "shape": "role", "glyph": "stakeholder", "description": "The perspective from which a business actor perceives architecture effects", "legacyAliases": [] },
+    { "id": "Driver", "name": "Driver", "domain": "motivation", "aspect": "motivation", "shape": "driver", "glyph": "driver", "description": "An internal or external condition that motivates change", "legacyAliases": [] },
+    { "id": "Assessment", "name": "Assessment", "domain": "motivation", "aspect": "motivation", "shape": "assessment", "glyph": "assessment", "description": "A result of analysis of a driver or state of affairs", "legacyAliases": ["Gap"] },
+    { "id": "Goal", "name": "Goal", "domain": "motivation", "aspect": "motivation", "shape": "goal", "glyph": "goal", "description": "A high-level statement of intent, direction, or desired end state", "legacyAliases": [] },
+    { "id": "Outcome", "name": "Outcome", "domain": "motivation", "aspect": "motivation", "shape": "outcome", "glyph": "outcome", "description": "An end result, effect, or consequence of a state of affairs", "legacyAliases": [] },
+    { "id": "Principle", "name": "Principle", "domain": "motivation", "aspect": "motivation", "shape": "principle", "glyph": "principle", "description": "A statement of intent defining a general property that applies in context", "legacyAliases": [] },
+    { "id": "Requirement", "name": "Requirement", "domain": "motivation", "aspect": "motivation", "shape": "requirement", "glyph": "requirement", "description": "A statement of need defining a property of a system", "legacyAliases": ["Constraint"] },
+    { "id": "Meaning", "name": "Meaning", "domain": "motivation", "aspect": "motivation", "shape": "meaning", "glyph": "meaning", "description": "Knowledge or expertise present in, or interpretation given to, a concept", "legacyAliases": [] },
+    { "id": "Value", "name": "Value", "domain": "motivation", "aspect": "motivation", "shape": "value", "glyph": "value", "description": "The relative worth, utility, or importance of a concept", "legacyAliases": [] },
+    { "id": "WorkPackage", "name": "Work Package", "domain": "implementation-migration", "aspect": "behavior", "shape": "work-package", "glyph": "work-package", "description": "A series of actions designed to achieve results within constraints", "legacyAliases": [] },
+    { "id": "Deliverable", "name": "Deliverable", "domain": "implementation-migration", "aspect": "structure", "shape": "document", "glyph": "deliverable", "description": "A result of a work package", "legacyAliases": [] },
+    { "id": "Plateau", "name": "Plateau", "domain": "implementation-migration", "aspect": "composite", "shape": "plateau", "glyph": "plateau", "description": "A relatively stable state of the architecture during a limited period", "legacyAliases": [] },
+    { "id": "AndJunction", "name": "And Junction", "domain": "common", "aspect": "composite", "shape": "junction", "glyph": "and-junction", "description": "A junction that requires all connected flows", "legacyAliases": [] },
+    { "id": "OrJunction", "name": "Or Junction", "domain": "common", "aspect": "composite", "shape": "junction", "glyph": "or-junction", "description": "A junction that permits one or more connected flows", "legacyAliases": [] }
+  ],
+  "relationships": [
+    { "id": "Composition", "name": "Composition", "category": "structural", "line": "solid", "marker": "diamond-filled", "description": "The source consists of the target and the target depends on the source", "sourceTypes": ["*"], "targetTypes": ["*"] },
+    { "id": "Aggregation", "name": "Aggregation", "category": "structural", "line": "solid", "marker": "diamond-open", "description": "The source combines the target", "sourceTypes": ["*"], "targetTypes": ["*"] },
+    { "id": "Assignment", "name": "Assignment", "category": "structural", "line": "solid", "marker": "arrow-open", "description": "The source allocates responsibility, performance, storage, or execution to the target", "sourceTypes": ["Role", "Collaboration", "BusinessActor", "ApplicationComponent", "Node", "Device", "SystemSoftware", "Equipment", "Facility", "BusinessInterface", "ApplicationInterface", "TechnologyInterface"], "targetTypes": ["Process", "Function", "Event", "Service", "Capability", "ValueStream", "CourseOfAction", "WorkPackage"] },
+    { "id": "Realization", "name": "Realization", "category": "dependency", "line": "dashed", "marker": "triangle-open", "description": "The source plays a critical role in creating, achieving, sustaining, or operating the target", "sourceTypes": ["*"], "targetTypes": ["*"] },
+    { "id": "Serving", "name": "Serving", "category": "dependency", "line": "dashed", "marker": "arrow-open", "description": "The source provides its functionality to the target", "sourceTypes": ["*"], "targetTypes": ["*"] },
+    { "id": "Access", "name": "Access", "category": "dependency", "line": "dashed", "marker": "arrow-open", "description": "The source observes or acts upon the target passive structure", "sourceTypes": ["Process", "Function", "Event", "Service", "Role", "Collaboration", "BusinessActor", "ApplicationComponent", "Node", "Device", "SystemSoftware", "Equipment", "Facility", "WorkPackage"], "targetTypes": ["BusinessObject", "DataObject", "Artifact", "Material", "Deliverable", "Resource"] },
+    { "id": "Influence", "name": "Influence", "category": "dependency", "line": "dashed", "marker": "arrow-open", "description": "The source affects the implementation or achievement of the target motivation element", "sourceTypes": ["*"], "targetTypes": ["Stakeholder", "Driver", "Assessment", "Goal", "Outcome", "Principle", "Requirement", "Meaning", "Value"] },
+    { "id": "Triggering", "name": "Triggering", "category": "dynamic", "line": "solid", "marker": "arrow-filled", "description": "A temporal or causal relationship between source and target", "sourceTypes": ["*"], "targetTypes": ["Process", "Function", "Event", "Service", "WorkPackage"] },
+    { "id": "Flow", "name": "Flow", "category": "dynamic", "line": "solid", "marker": "arrow-open", "description": "Transfer from the source to the target", "sourceTypes": ["*"], "targetTypes": ["*"] },
+    { "id": "Specialization", "name": "Specialization", "category": "other", "line": "solid", "marker": "triangle-filled", "description": "The source is a particular kind of the target", "sourceTypes": ["*"], "targetTypes": ["*"] },
+    { "id": "Association", "name": "Association", "category": "other", "line": "solid", "marker": "none", "description": "An unspecified relationship not represented by another relationship type", "sourceTypes": ["*"], "targetTypes": ["*"] }
+  ]
+}

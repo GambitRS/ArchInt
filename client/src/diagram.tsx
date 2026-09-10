@@ -6,6 +6,11 @@ import {
   connectorPoints,
   type SnapGuide,
 } from "./editor/geometry";
+import type {
+  ArchimateDocument,
+  ArchimateElementType,
+  ArchimateRelationshipType,
+} from "./model/archimate";
 export type Kind =
   | "card"
   | "container"
@@ -66,6 +71,22 @@ export type Element = {
   waypoints?: Waypoint[];
   arrowhead?: Arrowhead;
   iconName?: IconName;
+  /** Semantic identity is separate from the view occurrence. */
+  archimateType?: ArchimateElementType;
+  elementType?: ArchimateElementType;
+  semanticType?: ArchimateElementType;
+  modelElementId?: string;
+  viewNodeId?: string;
+  relationshipType?: ArchimateRelationshipType;
+  archimateRelationship?: ArchimateRelationshipType;
+  relationshipId?: string;
+  viewConnectionId?: string;
+  sourceMultiplicity?: string;
+  targetMultiplicity?: string;
+  accessType?: "read" | "write" | "read-write" | "unspecified";
+  influenceStrength?: "+" | "++" | "-" | "--";
+  semanticProperties?: Record<string, string>;
+  semanticExtensions?: Record<string, unknown>;
 };
 export type Drawing = {
   id: string;
@@ -74,6 +95,10 @@ export type Drawing = {
   category: string;
   elements: Element[];
   revision: number;
+  /** Canonical ArchiMate document. `elements` remains a view compatibility projection. */
+  document?: ArchimateDocument;
+  activeViewId?: string;
+  viewSummaries?: { id: string; name: string; width: number; height: number }[];
 };
 export function makeExample(): Element[] {
   const list: Element[] = [];

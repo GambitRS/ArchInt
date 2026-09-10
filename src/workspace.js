@@ -1,6 +1,12 @@
 const crypto = require("node:crypto");
 const { promisify } = require("node:util");
 const { hashPassword, validPassword, verifyPassword } = require("./password");
+const {
+  canonicalDocumentForDrawing,
+  ensureCanonicalDocument,
+  flattenDocument,
+  validateLegacyElements,
+} = require("../shared/archimate-model");
 const scrypt = promisify(crypto.scrypt);
 const hash = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const lifetime = 7 * 24 * 60 * 60 * 1000;
@@ -37,104 +43,15 @@ function validDocument(d) {
     !d ||
     typeof d.name !== "string" ||
     d.name.length > 100 ||
-    !["Architecture", "Diagram"].includes(d.category) ||
-    !Array.isArray(d.elements) ||
-    d.elements.length > 2000
+    !["Architecture", "Diagram"].includes(d.category)
   )
     return false;
-  const ids = new Set();
-  const valid = d.elements.every((e) => {
-    if (!e || typeof e.id !== "string" || e.id.length > 100 || ids.has(e.id))
-      return false;
-    ids.add(e.id);
-    return (
-      ["card", "container", "text", "ellipse", "arrow", "pen", "icon"].includes(
-        e.kind,
-      ) &&
-      ["x", "y", "w", "h", "fontSize"].every(
-        (k) => Number.isFinite(e[k]) && Math.abs(e[k]) <= 100000,
-      ) &&
-      (e.kind === "arrow" || (e.w >= 0 && e.h >= 0)) &&
-      e.fontSize >= 8 &&
-      e.fontSize <= 80 &&
-      ["text", "detail"].every(
-        (k) => typeof e[k] === "string" && e[k].length <= 10000,
-      ) &&
-      ["fill", "stroke"].every(
-        (k) => typeof e[k] === "string" && /^#[a-f0-9]{6}$/i.test(e[k]),
-      ) &&
-      (e.rotation === undefined ||
-        (Number.isFinite(e.rotation) && Math.abs(e.rotation) <= 3600)) &&
-      (e.groupId === undefined ||
-        (typeof e.groupId === "string" && e.groupId.length <= 100)) &&
-      (e.parentId === undefined ||
-        (typeof e.parentId === "string" && e.parentId.length <= 100)) &&
-      (e.locked === undefined || typeof e.locked === "boolean") &&
-      (e.hidden === undefined || typeof e.hidden === "boolean") &&
-      (e.strokeWidth === undefined ||
-        (Number.isFinite(e.strokeWidth) && e.strokeWidth > 0 && e.strokeWidth <= 100)) &&
-      (e.fontWeight === undefined || [400, 500, 600, 700].includes(e.fontWeight)) &&
-      (e.lineHeight === undefined ||
-        (Number.isFinite(e.lineHeight) && e.lineHeight >= 1 && e.lineHeight <= 3)) &&
-      (e.textAlign === undefined || ["left", "center", "right"].includes(e.textAlign)) &&
-      (e.wrap === undefined || typeof e.wrap === "boolean") &&
-      (e.overflow === undefined || ["visible", "hidden"].includes(e.overflow)) &&
-      (e.sourceAnchor === undefined ||
-        (e.sourceAnchor &&
-          typeof e.sourceAnchor.elementId === "string" &&
-          e.sourceAnchor.elementId.length <= 100 &&
-          ANCHOR_SIDES.includes(e.sourceAnchor.side) &&
-          Number.isFinite(e.sourceAnchor.offset) &&
-          e.sourceAnchor.offset >= 0 &&
-          e.sourceAnchor.offset <= 1)) &&
-      (e.targetAnchor === undefined ||
-        (e.targetAnchor &&
-          typeof e.targetAnchor.elementId === "string" &&
-          e.targetAnchor.elementId.length <= 100 &&
-          ANCHOR_SIDES.includes(e.targetAnchor.side) &&
-          Number.isFinite(e.targetAnchor.offset) &&
-          e.targetAnchor.offset >= 0 &&
-          e.targetAnchor.offset <= 1)) &&
-      (e.route === undefined || ["straight", "orthogonal"].includes(e.route)) &&
-      (e.arrowhead === undefined ||
-        ["none", "open", "triangle", "circle"].includes(e.arrowhead)) &&
-      (e.iconName === undefined || ICON_NAMES.includes(e.iconName)) &&
-      (e.waypoints === undefined ||
-        (e.kind === "arrow" &&
-          Array.isArray(e.waypoints) &&
-          e.waypoints.length <= 100 &&
-          e.waypoints.every(
-            (p) =>
-              p &&
-              Number.isFinite(p.x) &&
-              Number.isFinite(p.y) &&
-              Math.abs(p.x) <= 100000 &&
-              Math.abs(p.y) <= 100000,
-          ))) &&
-      (e.points === undefined ||
-        (Array.isArray(e.points) &&
-          e.points.length <= 20000 &&
-          e.points.every(
-            (p) =>
-              Array.isArray(p) &&
-              p.length === 2 &&
-              p.every((n) => Number.isFinite(n) && Math.abs(n) <= 100000),
-          )))
-    );
-  });
-  if (!valid) return false;
-  return d.elements.every(
-    (e) =>
-      e.parentId === undefined ||
-      (e.parentId !== e.id && ids.has(e.parentId)),
-  ) &&
-    d.elements.every(
-      (e) =>
-        (!e.sourceAnchor ||
-          (e.sourceAnchor.elementId !== e.id && ids.has(e.sourceAnchor.elementId))) &&
-        (!e.targetAnchor ||
-          (e.targetAnchor.elementId !== e.id && ids.has(e.targetAnchor.elementId))),
-    );
+  if (Array.isArray(d.elements) && validateLegacyElements(d.elements).length) return false;
+  try {
+    return canonicalDocumentForDrawing(d).errors.length === 0;
+  } catch {
+    return false;
+  }
 }
 
 function mountWorkspace(app, db) {
@@ -355,14 +272,31 @@ function mountWorkspace(app, db) {
     res.setHeader("Cache-Control", "no-store");
     next();
   });
-  const serialize = (row) => ({
-    id: row.id,
-    name: row.name,
-    category: row.category,
-    updated: row.updatedAt,
-    elements: JSON.parse(row.document),
-    revision: row.revision,
-  });
+  const serialize = (row) => {
+    const document = ensureCanonicalDocument(JSON.parse(row.document), { name: row.name });
+    const activeView = document.views.find((view) => view.id === document.activeViewId) || document.views[0];
+    return {
+      id: row.id,
+      name: row.name,
+      category: row.category,
+      updated: row.updatedAt,
+      document,
+      elements: flattenDocument(document),
+      activeViewId: document.activeViewId,
+      viewSummaries: document.views.map((view) => ({
+        id: view.id,
+        name: view.name,
+        width: view.width,
+        height: view.height,
+      })),
+      defaultView: activeView?.name || "Main view",
+      documentFormat: document.format,
+      languageVersion: document.language.version,
+      semanticElementCount: Object.keys(document.model.elements).length,
+      relationshipCount: Object.keys(document.model.relationships).length,
+      revision: row.revision,
+    };
+  };
 
   const ownedDrawing = (id, userId) =>
     db.prepare("SELECT * FROM Drawing WHERE id=? AND userId=?").get(id, userId);
@@ -399,6 +333,8 @@ function mountWorkspace(app, db) {
       }
     }
 
+    const canonical = canonicalDocumentForDrawing(d).document;
+    canonical.model.name = normalizeDrawingName(d.name);
     const id = crypto.randomUUID();
     db.prepare(
       "INSERT INTO Drawing (id,userId,name,category,document,updatedAt,revision) VALUES (?,?,?,?,?,?,1)",
@@ -407,7 +343,7 @@ function mountWorkspace(app, db) {
       userId,
       normalizeDrawingName(d.name),
       d.category,
-      JSON.stringify(d.elements),
+      JSON.stringify(canonical),
       new Date().toISOString(),
     );
     if (requestId) {
@@ -447,6 +383,8 @@ function mountWorkspace(app, db) {
         .status(400)
         .json({ error: "Drawing data is invalid or too large" });
     const d = req.body;
+    const canonical = canonicalDocumentForDrawing(d).document;
+    canonical.model.name = normalizeDrawingName(d.name);
     if (d.revision !== existing.revision)
       return res
         .status(409)
@@ -459,7 +397,7 @@ function mountWorkspace(app, db) {
     ).run(
       normalizeDrawingName(d.name),
       d.category,
-      JSON.stringify(d.elements),
+      JSON.stringify(canonical),
       new Date().toISOString(),
       req.params.id,
       req.workspaceUser.id,
