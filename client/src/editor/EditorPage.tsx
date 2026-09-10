@@ -1,5 +1,11 @@
 import { useState, type PointerEventHandler, type RefObject } from "react";
-import { Diagram, type Drawing, type Element, type Kind } from "../diagram";
+import {
+  ArchimateCornerGlyph,
+  Diagram,
+  type Drawing,
+  type Element,
+  type Kind,
+} from "../diagram";
 import type { SnapGuide } from "./geometry";
 import {
   ARCHIMATE_CATALOG,
@@ -282,9 +288,17 @@ export function EditorPage({
                         title={candidate.description}
                         onClick={() => onAddSemantic(candidate.id as ArchimateElementType)}
                       >
-                        <span className="semantic-glyph" aria-hidden="true">
-                          {candidate.name.slice(0, 1)}
-                        </span>
+                        <svg className="semantic-glyph" viewBox="0 0 24 24" aria-hidden="true">
+                          <ArchimateCornerGlyph
+                            type={candidate.id as ArchimateElementType}
+                            x={0}
+                            y={0}
+                            w={24}
+                            h={24}
+                            color="#53765b"
+                            fill="none"
+                          />
+                        </svg>
                         {candidate.name}
                       </button>
                     ))}

@@ -762,6 +762,9 @@ small {
   color: #53765b;
   font-size: 9px;
   font-weight: 700;
+  padding: 1px;
+  box-sizing: border-box;
+  overflow: visible;
 }
 .existing-models {
   border-top: 1px solid #e7ece2;

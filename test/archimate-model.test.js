@@ -23,15 +23,20 @@ test("ArchiMate 4 catalogue covers the domains, concepts, and relationships", ()
   assert.deepEqual(
     model.ARCHIMATE_CATALOG.domains.map((domain) => domain.id),
     [
+      "motivation",
+      "strategy",
       "common",
       "business",
       "application",
       "technology",
-      "strategy",
-      "motivation",
       "implementation-migration",
     ],
   );
+  assert.equal(
+    new Set(model.ARCHIMATE_CATALOG.elements.map((element) => element.glyph)).size,
+    model.ARCHIMATE_CATALOG.elements.length,
+  );
+  assert.ok(model.ARCHIMATE_CATALOG.elements.every((element) => element.glyph));
   assert.ok(model.ELEMENT_TYPES.includes("Process"));
   assert.ok(model.ELEMENT_TYPES.includes("ApplicationComponent"));
   assert.ok(model.ELEMENT_TYPES.includes("Plateau"));

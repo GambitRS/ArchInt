@@ -6,10 +6,11 @@ third-party artwork or trademarks. The shapes are intentionally generic
 representations of the ArchiMate notation roles described by The Open Group;
 the catalogue remains the authority for the semantic element type.
 
-`glyphs.svg` is a local reference sprite for the reusable geometry families:
-role/actor, document, network, junction, motivation, location, product,
-resource, interface, service, and component. The editor renders the same
-geometry inline so exported SVG, PNG, and PDF snapshots remain self-contained.
+`glyphs.svg` is a local reference sprite for the reusable geometry families.
+The editor renders a compact, concept-specific glyph inline in the top-right
+corner of every semantic element box, so exported SVG, PNG, and PDF snapshots
+remain self-contained. The glyph is line-based and remains legible in
+monochrome output.
 
 Catalogue entries associate each semantic type with a `shape` and `glyph` id in
 `shared/archimate-catalog.json`. These assets are application notation helpers,

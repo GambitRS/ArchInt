@@ -20,6 +20,16 @@
   },
   "domains": [
     {
+      "id": "motivation",
+      "name": "Motivation",
+      "description": "The context and reasons behind the architecture"
+    },
+    {
+      "id": "strategy",
+      "name": "Strategy",
+      "description": "Resources, capabilities, value streams, and courses of action"
+    },
+    {
       "id": "common",
       "name": "Common",
       "description": "Cross-domain behaviour, active structure, and composite concepts"
@@ -38,16 +48,6 @@
       "id": "technology",
       "name": "Technology",
       "description": "Technology and physical infrastructure"
-    },
-    {
-      "id": "strategy",
-      "name": "Strategy",
-      "description": "Resources, capabilities, value streams, and courses of action"
-    },
-    {
-      "id": "motivation",
-      "name": "Motivation",
-      "description": "The context and reasons behind the architecture"
     },
     {
       "id": "implementation-migration",
