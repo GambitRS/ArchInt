@@ -591,6 +591,16 @@ small {
 .drawing-info small {
   font-size: 10px;
 }
+.library-actions {
+  gap: 8px;
+}
+.library-actions > button:first-child {
+  border: 1px solid #dce3d9;
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-size: 11px;
+  white-space: nowrap;
+}
 .new-card {
   min-height: 280px;
   border: 1px dashed #ccd7c3;
@@ -763,6 +773,50 @@ small {
   color: #3e6a4b;
   font-size: 9px;
   padding: 3px 6px;
+}
+.import-summary-dialog {
+  max-width: 620px;
+}
+.import-file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-bottom: 12px;
+}
+.import-summary-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin: 14px 0;
+}
+.import-summary-meta span {
+  border: 1px solid #dfe7dc;
+  border-radius: 999px;
+  background: #f7faf3;
+  color: #5f7562;
+  font-size: 10px;
+  padding: 5px 8px;
+}
+.import-summary-section {
+  border-radius: 7px;
+  padding: 12px 14px;
+  margin-top: 12px;
+  font-size: 11px;
+}
+.import-summary-section ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  line-height: 1.7;
+}
+.import-errors {
+  background: #fff1ed;
+  color: #9a4b3e;
+  border: 1px solid #f0c8bf;
+}
+.import-warnings {
+  background: #fff9e9;
+  color: #826a35;
+  border: 1px solid #ead7a4;
 }
 .editor-layout {
   display: grid;

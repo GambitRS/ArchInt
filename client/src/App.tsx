@@ -5,11 +5,17 @@ import { ReauthenticationDialog } from "./auth/ReauthenticationDialog";
 import { ApiError, api, messageForError } from "./api";
 import { Brand } from "./components/Brand";
 import { EditorPage } from "./editor/EditorPage";
+import { ImportSummaryDialog } from "./editor/ImportSummaryDialog";
 import {
   ExportDialog,
   type ExportOptions,
 } from "./editor/ExportDialog";
-import { parseDocumentJson, serializeDocument } from "./editor/document";
+import { documentForDrawing, serializeDocument } from "./editor/document";
+import {
+  parseArchimateFile,
+  serializeArchimateFile,
+  type ArchimateFileFormat,
+} from "./editor/archimate-file";
 import { CreateDrawingDialog } from "./library/CreateDrawingDialog";
 import { DrawingLibrary } from "./library/DrawingLibrary";
 import { buildPdfFromJpeg } from "./editor/pdf";
@@ -60,6 +66,14 @@ type Alignment =
   | "center-y"
   | "bottom";
 type Distribution = "horizontal" | "vertical";
+type PendingImport = {
+  filename: string;
+  document: ArchimateDocument;
+  format: ArchimateFileFormat;
+  languageVersion?: string;
+  warnings: string[];
+  errors: string[];
+};
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>("login");
@@ -91,9 +105,12 @@ export default function App() {
   const [guides, setGuides] = useState<SnapGuide[]>([]);
   const [selectionBox, setSelectionBox] = useState<Bounds | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
+  const [importSummary, setImportSummary] = useState<PendingImport | null>(null);
+  const [importBusy, setImportBusy] = useState(false);
   const [recoveryDraft, setRecoveryDraft] = useState<Drawing | null>(null);
   const svg = useRef<SVGSVGElement>(null);
   const importInput = useRef<HTMLInputElement>(null);
+  const importIdempotencyKey = useRef<string | null>(null);
   const drag = useRef<{
     id: string;
     x: number;
@@ -1849,7 +1866,7 @@ export default function App() {
     return new Blob([bytes], { type });
   }
   async function exportDrawing(options: ExportOptions) {
-    if (!svg.current || !drawing) return;
+    if (!drawing) return;
     const baseName = drawing.name.replace(/[^a-z0-9 _-]/gi, "").trim() || "drawing";
     if (options.format === "json") {
       downloadBlob(
@@ -1859,8 +1876,29 @@ export default function App() {
       setExportOpen(false);
       return;
     }
+    if (options.format === "archimate" || options.format === "exchange") {
+      const document = documentForDrawing(drawing);
+      const exported = serializeArchimateFile(document, {
+        format: options.format === "archimate" ? "native" : "open-group-exchange",
+        category: drawing.category,
+        languageVersion: "3.2",
+      });
+      if (exported.errors.length) {
+        setError(`File export rejected: ${exported.errors.join("; ")}`);
+        return;
+      }
+      if (exported.warnings.length && !window.confirm(`This is an interoperability snapshot.\n\n${exported.warnings.join("\n\n")}\n\nContinue with the download?`)) return;
+      downloadBlob(
+        new Blob([exported.content], { type: options.format === "archimate" ? "application/vnd.archint.archimate+json" : "application/xml;charset=utf-8" }),
+        `${baseName}${exported.extension}`,
+      );
+      setExportOpen(false);
+      return;
+    }
+    if (!svg.current) return;
 
-    const page = { x: 0, y: 0, w: 1400, h: 900 };
+    const activeView = drawing.document?.views.find((view) => view.id === (drawing.activeViewId || drawing.document?.activeViewId)) || drawing.document?.views[0];
+    const page = { x: 0, y: 0, w: activeView?.width || 1400, h: activeView?.height || 900 };
     const selectedBounds =
       options.bounds === "selection"
         ? boundsForElements(drawing.elements, selectedIds)
@@ -1952,33 +1990,60 @@ export default function App() {
       URL.revokeObjectURL(url);
     }
   }
-  async function importJson(event: ChangeEvent<HTMLInputElement>) {
+  async function importFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.currentTarget.files?.[0];
     event.currentTarget.value = "";
-    if (!file || !drawing) return;
-    if (file.size > 5 * 1024 * 1024) {
-      setError("This JSON document is larger than the 5 MB import limit.");
-      return;
-    }
+    if (!file) return;
     try {
-      const imported = parseDocumentJson(await file.text());
-      setHistory((h) => [...h.slice(-49), structuredClone(drawing.elements)]);
-      setFuture([]);
-      setSelectedIds([]);
-      commit({
-        ...drawing,
-        name: imported.name || drawing.name,
-        category: imported.category || drawing.category,
-        elements: imported.elements,
-        updated: new Date().toISOString(),
+      const imported = parseArchimateFile(await file.text(), file.name);
+      setImportSummary({
+        filename: file.name,
+        document: imported.document,
+        format: imported.format,
+        languageVersion: imported.languageVersion,
+        warnings: imported.warnings,
+        errors: imported.errors,
       });
       setError("");
     } catch (error) {
-      setError(
-        `JSON import rejected: ${
-          error instanceof Error ? error.message : "invalid document"
-        }`,
+      setImportSummary({
+        filename: file.name,
+        document: ensureCanonicalDocument([], { name: file.name }),
+        format: "unknown",
+        warnings: [],
+        errors: [error instanceof Error ? error.message : "invalid document"],
+      });
+    }
+  }
+  async function confirmImport() {
+    if (!importSummary || importSummary.errors.length || importBusy) return;
+    setImportBusy(true);
+    setError("");
+    const idempotencyKey = importIdempotencyKey.current || crypto.randomUUID();
+    importIdempotencyKey.current = idempotencyKey;
+    try {
+      const document = ensureCanonicalDocument(importSummary.document);
+      const imported = await api<Drawing>(
+        "/drawings",
+        "POST",
+        {
+          name: document.model.name || importSummary.filename.replace(/\.[^.]+$/, ""),
+          category: "Architecture",
+          document,
+          elements: flattenDocument(document),
+        },
+        { "Idempotency-Key": idempotencyKey },
       );
+      importIdempotencyKey.current = null;
+      const normalized = drawingWithActiveView(imported);
+      revisions.current.set(normalized.id, normalized.revision);
+      setDrawings((items) => [normalized, ...items.filter((item) => item.id !== normalized.id)]);
+      setImportSummary(null);
+      open(normalized);
+    } catch (error) {
+      setError(`Import could not be saved: ${messageForError(error)}`);
+    } finally {
+      setImportBusy(false);
     }
   }
   function restoreRecovery() {
@@ -2037,8 +2102,8 @@ export default function App() {
     <div className="app">
       <div
         className="app-content"
-        inert={modal || reauthOpen || exportOpen || undefined}
-        aria-hidden={modal || reauthOpen || exportOpen || undefined}
+        inert={modal || reauthOpen || exportOpen || Boolean(importSummary) || undefined}
+        aria-hidden={modal || reauthOpen || exportOpen || Boolean(importSummary) || undefined}
       >
       <header className="topbar">
         <Brand />
@@ -2086,17 +2151,17 @@ export default function App() {
                 Export ↗
               </button>
               <button type="button" onClick={() => importInput.current?.click()}>
-                Import JSON
+                Open ArchiMate file
               </button>
-              <input
-                ref={importInput}
-                type="file"
-                accept="application/json,.json"
-                hidden
-                onChange={(event) => void importJson(event)}
-              />
             </>
           )}
+          <input
+            ref={importInput}
+            type="file"
+            accept=".archimate,.xml,.json,application/json,application/xml,text/xml"
+            hidden
+            onChange={(event) => void importFile(event)}
+          />
           <button
             type="button"
             className="avatar"
@@ -2159,6 +2224,7 @@ export default function App() {
           onFilterChange={setFilter}
           onSearchChange={setSearch}
           onOpen={open}
+          onImport={() => importInput.current?.click()}
           onCreate={() => openCreate()}
           onUseArchitectureTemplate={() =>
             openCreate("architecture", "AI harness architecture")
@@ -2267,6 +2333,21 @@ export default function App() {
           e.preventDefault();
           void reauthenticate();
         }}
+      />
+      <ImportSummaryDialog
+        open={Boolean(importSummary)}
+        filename={importSummary?.filename || ""}
+        format={importSummary?.format || "unknown"}
+        languageVersion={importSummary?.languageVersion}
+        warnings={importSummary?.warnings || []}
+        errors={importSummary?.errors || []}
+        onClose={() => {
+          if (!importBusy) {
+            importIdempotencyKey.current = null;
+            setImportSummary(null);
+          }
+        }}
+        onConfirm={() => void confirmImport()}
       />
     </div>
   );

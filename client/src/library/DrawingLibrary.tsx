@@ -9,6 +9,7 @@ type DrawingLibraryProps = {
   onFilterChange: (filter: string) => void;
   onSearchChange: (search: string) => void;
   onOpen: (drawing: Drawing) => void;
+  onImport: () => void;
   onCreate: () => void;
   onUseArchitectureTemplate: () => void;
 };
@@ -21,6 +22,7 @@ export function DrawingLibrary({
   onFilterChange,
   onSearchChange,
   onOpen,
+  onImport,
   onCreate,
   onUseArchitectureTemplate,
 }: DrawingLibraryProps) {
@@ -86,6 +88,7 @@ export function DrawingLibrary({
               Pick up where you left off, or start with a new idea.
             </p>
           </div>
+          <button type="button" onClick={onImport}>Open ArchiMate file</button>
           <button className="primary" onClick={onCreate}>
             ＋ New drawing
           </button>
@@ -135,7 +138,10 @@ export function DrawingLibrary({
             >
               <div className="thumbnail">
                 {drawing.elements.length ? (
-                  <Diagram elements={drawing.elements} />
+                  <Diagram
+                    elements={drawing.elements}
+                    page={drawing.document?.views.find((view) => view.id === (drawing.activeViewId || drawing.document?.activeViewId)) || drawing.document?.views[0]}
+                  />
                 ) : (
                   <span className="blank-preview">
                     ＋<small>A fresh perspective</small>
@@ -149,7 +155,11 @@ export function DrawingLibrary({
                   <span>↗</span>
                 </div>
                 <div className="row between">
-                  <small>{drawing.category}</small>
+                  <small>
+                    {drawing.document
+                      ? `ArchiMate 4.0 · ${drawing.document.views.length} view${drawing.document.views.length === 1 ? "" : "s"}`
+                      : drawing.category}
+                  </small>
                   <small>
                     {new Date(drawing.updated).toLocaleDateString(undefined, {
                       month: "short",

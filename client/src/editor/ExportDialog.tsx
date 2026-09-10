@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-export type ExportFormat = "svg" | "png" | "pdf" | "json";
+export type ExportFormat = "svg" | "png" | "pdf" | "json" | "archimate" | "exchange";
 export type ExportBounds = "page" | "selection";
 export type ExportScale = 1 | 2 | 4;
 export type ExportBackground = "white" | "transparent";
@@ -55,7 +55,7 @@ export function ExportDialog({
   if (!open) return null;
 
   const close = () => onClose();
-  const json = format === "json";
+  const fileExport = format === "json" || format === "archimate" || format === "exchange";
 
   return (
     <div className="modal-backdrop" onClick={close}>
@@ -69,8 +69,8 @@ export function ExportDialog({
           event.preventDefault();
           onExport({
             format,
-            bounds: json ? "page" : bounds,
-            scale: json ? 1 : scale,
+            bounds: fileExport ? "page" : bounds,
+            scale: fileExport ? 1 : scale,
             background: format === "pdf" ? "white" : background,
           });
         }}
@@ -116,10 +116,12 @@ export function ExportDialog({
             <option value="svg">SVG — editable vector</option>
             <option value="png">PNG — raster image</option>
             <option value="pdf">PDF — print image</option>
+            <option value="archimate">ArchiMate file — lossless ArchInt model</option>
+            <option value="exchange">Open Group XML — 3.2 exchange</option>
             <option value="json">JSON — ArchInt document</option>
           </select>
         </label>
-        <fieldset disabled={json}>
+        <fieldset disabled={fileExport}>
           <legend>Bounds</legend>
           <label className="choice-row">
             <input
@@ -147,7 +149,7 @@ export function ExportDialog({
           <label>
             Scale
             <select
-              disabled={json}
+              disabled={fileExport}
               value={scale}
               onChange={(event) =>
                 setScale(Number(event.target.value) as ExportScale)
@@ -161,7 +163,7 @@ export function ExportDialog({
           <label>
             Background
             <select
-              disabled={json || format === "pdf"}
+              disabled={fileExport || format === "pdf"}
               value={background}
               onChange={(event) =>
                 setBackground(event.target.value as ExportBackground)
@@ -173,8 +175,9 @@ export function ExportDialog({
           </label>
         </div>
         <p className="modal-note">
-          Large raster exports are capped to keep the browser responsive. PDF
-          output uses a white page for reliable printing.
+          ArchInt files preserve the editable model and view identities. Open
+          Group XML is an interoperability snapshot; 4.0-only features may be
+          retained in an ArchInt extension for tools that understand it.
         </p>
         <div className="row between modal-actions export-actions">
           <button type="button" onClick={close}>
