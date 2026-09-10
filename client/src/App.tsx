@@ -76,6 +76,12 @@ type PendingImport = {
   errors: string[];
 };
 
+function kindForSemanticType(type: ArchimateElementType): Kind {
+  if (["Event", "AndJunction", "OrJunction"].includes(type)) return "ellipse";
+  if (["Grouping", "Location", "Product", "Plateau"].includes(type)) return "container";
+  return "card";
+}
+
 export default function App() {
   const [screen, setScreen] = useState<Screen>("login");
   const [user, setUser] = useState<User | null>(null);
@@ -1687,11 +1693,7 @@ export default function App() {
     if (!definition) return;
     const style = defaultStyle(type);
     const index = drawing.elements.filter((candidate) => candidate.archimateType).length;
-    const kind: Kind = ["Event", "AndJunction", "OrJunction"].includes(type)
-      ? "ellipse"
-      : ["Grouping", "Location", "Product", "Plateau"].includes(type)
-        ? "container"
-        : "card";
+    const kind = kindForSemanticType(type);
     const semantic: Element = {
       id: `occurrence-${crypto.randomUUID()}`,
       kind,
@@ -1724,11 +1726,11 @@ export default function App() {
     const index = drawing.elements.length;
     const occurrence: Element = {
       id: `occurrence-${crypto.randomUUID()}`,
-      kind: "card",
+      kind: kindForSemanticType(model.type),
       x: 120 + (index % 4) * 250,
       y: 120 + Math.floor(index / 4) * 130,
-      w: 210,
-      h: 86,
+      w: kindForSemanticType(model.type) === "ellipse" ? 150 : 210,
+      h: kindForSemanticType(model.type) === "ellipse" ? 100 : 86,
       text: model.name,
       detail: model.documentation,
       fill: style.fill || "#edf3fc",
@@ -1748,7 +1750,7 @@ export default function App() {
       const style = defaultStyle(type);
       return {
         ...candidate,
-        kind: candidate.kind === "icon" ? "card" : candidate.kind,
+        kind: kindForSemanticType(type),
         archimateType: type,
         modelElementId: candidate.modelElementId || `model-${crypto.randomUUID()}`,
         fill: candidate.fill || style.fill || "#edf3fc",

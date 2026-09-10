@@ -162,6 +162,16 @@ function parseJsonExtension(node: XmlElement | undefined): Record<string, unknow
   }
 }
 
+function parseJsonArray(node: XmlElement | undefined): unknown[] | undefined {
+  if (!node) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(textOf(node));
+    return Array.isArray(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function styleFor(node: XmlElement, type: ArchimateElementType): Partial<LegacyElement> {
   const source = firstChild(node, ["style", "appearance", "format"]) || node;
   const defaults = defaultStyle(type);
@@ -203,13 +213,14 @@ function sideFor(source: ViewNode, target: ViewNode): AnchorSide {
 
 function parseVersion(root: XmlElement, source: string): string {
   const explicit = attr(root, ["version", "formatVersion", "modelVersion", "exchangeVersion"]);
-  const match = `${explicit || ""} ${source}`.match(/(?:^|[^\d])(3\.1|3\.2)(?:[^\d]|$)/);
-  return match?.[1] || (source.includes("3.1") ? "3.1" : "3.2");
+  if (explicit) return explicit;
+  const match = source.match(/(?:^|[^\d])(4\.0|3\.1|3\.2)(?:[^\d]|$)/);
+  return match?.[1] || "3.2";
 }
 
 function parseXml(source: string): { root?: XmlElement; version?: string; errors: string[] } {
   if (new TextEncoder().encode(source).length > MAX_BYTES) return { errors: ["file exceeds the 5 MB limit"] };
-  if (/<!doctype|<!entity|\b(?:system|public)\b/i.test(source)) return { errors: ["XML document uses a forbidden external entity or doctype"] };
+  if (/<!doctype|<!entity|\b(?:system|public)\s+["']/i.test(source)) return { errors: ["XML document uses a forbidden external entity or doctype"] };
   const parsed = new DOMParser().parseFromString(source, "application/xml");
   if (parsed.getElementsByTagName("parsererror").length) return { errors: ["XML document is not well formed"] };
   const root = parsed.documentElement;
@@ -273,6 +284,8 @@ function parseExchange(source: string, filename: string, root: XmlElement, versi
   const errors: string[] = [];
   const document = createDocument(valueOf(root, ["name", "title"], ["name"]) || filename || "Imported ArchiMate model");
   document.extensions = { sourceFormat: "open-group-exchange", sourceLanguageVersion: version, importedXml: { root: root.tagName, namespace: attr(root, ["xmlns"]) } };
+  const rootExtension = parseJsonExtension(firstChild(root, ["extensions"]));
+  if (rootExtension) document.extensions = { ...document.extensions, ...rootExtension };
   const elements: Record<string, ArchimateDocument["model"]["elements"][string]> = {};
   const elementIds = new Map<string, string>();
   for (const [index, node] of collectionItems(root, ["elements", "modelElements"], ["element", "modelElement", "concept"]).entries()) {
@@ -437,8 +450,8 @@ function parseExchange(source: string, filename: string, root: XmlElement, versi
       maxX = Math.max(maxX, bounds.x + bounds.w);
       maxY = Math.max(maxY, bounds.y + bounds.h);
     }
-    const annotationJson = parseJsonExtension(firstChild(sourceView, ["annotations"]));
-    if (annotationJson && Array.isArray(annotationJson)) {
+    const annotationJson = parseJsonArray(firstChild(sourceView, ["annotations"]));
+    if (annotationJson) {
       for (const item of annotationJson) {
         if (isRecord(item) && typeof item.id === "string" && isRecord(item.element)) {
           view.annotations[item.id] = item as unknown as ArchimateView["annotations"][string];
@@ -462,6 +475,16 @@ function parseExchange(source: string, filename: string, root: XmlElement, versi
       view.nodes[nodeId] = { id: nodeId, elementId: model.id, x: 80 + (index % 4) * 250, y: 80 + Math.floor(index / 4) * 130, w: 210, h: 86, rotation: 0, kind: shapeKind(model.type), label: model.name, style };
       view.order.push(nodeId);
       index += 1;
+    }
+  }
+  const organization = descendants(root, ["organizations", "organization"])[0];
+  const organizationJson = organization ? textOf(firstChild(organization, ["json"])) : "";
+  if (organizationJson) {
+    try {
+      const parsedOrganization: unknown = JSON.parse(organizationJson);
+      if (Array.isArray(parsedOrganization)) document.model.organization = parsedOrganization;
+    } catch {
+      warnings.push("the organization extension could not be decoded");
     }
   }
   document.activeViewId = document.views[0].id;
@@ -561,7 +584,12 @@ export function serializeArchimateFile(documentInput: ArchimateDocument, options
   if (format === "open-group-exchange") {
     try {
       const exported = serializeOpenGroupExchange(document, options.languageVersion || "3.2");
-      return { content: exported.content, format, extension: ".xml", warnings: exported.warnings, errors: [] };
+      const structural = validateOpenGroupExchangeXml(exported.content);
+      if (!structural.valid) return { content: "", format, extension: ".xml", warnings: exported.warnings, errors: structural.errors };
+      const reopened = parseArchimateFile(exported.content, "exported.xml");
+      return reopened.errors.length === 0
+        ? { content: exported.content, format, extension: ".xml", warnings: exported.warnings, errors: [] }
+        : { content: "", format, extension: ".xml", warnings: exported.warnings, errors: reopened.errors };
     } catch (error) {
       return { content: "", format, extension: ".xml", warnings: [], errors: [error instanceof Error ? error.message : "could not create exchange file"] };
     }

@@ -125,7 +125,7 @@ function findTagEnd(source, start) {
 function parseXml(source) {
   if (typeof source !== "string" || !source.trim()) throw new Error("XML document is empty");
   if (Buffer.byteLength(source, "utf8") > MAX_DOCUMENT_BYTES) throw new Error("XML document exceeds the 5 MB limit");
-  if (/<!doctype|<!entity|\b(?:system|public)\b/i.test(source)) throw new Error("XML document uses a forbidden external entity or doctype");
+  if (/<!doctype|<!entity|\b(?:system|public)\s+["']/i.test(source)) throw new Error("XML document uses a forbidden external entity or doctype");
   const root = { name: "#document", attrs: {}, children: [], text: "" };
   const stack = [root];
   let cursor = 0;
@@ -322,8 +322,9 @@ function sideFor(source, target) {
 
 function parseVersion(root, source) {
   const explicit = getAttr(root, ["version", "formatVersion", "modelVersion", "exchangeVersion"]);
-  const match = `${explicit || ""} ${source || ""}`.match(/(?:^|[^\d])(3\.1|3\.2)(?:[^\d]|$)/);
-  return match?.[1] || (source.includes("3.1") ? "3.1" : "3.2");
+  if (explicit) return explicit;
+  const match = source.match(/(?:^|[^\d])(4\.0|3\.1|3\.2)(?:[^\d]|$)/);
+  return match?.[1] || "3.2";
 }
 
 function detectArchimateFileFormat(input, filename = "") {
@@ -392,6 +393,15 @@ function parseOpenGroupExchange(source, filename, root, version) {
     sourceLanguageVersion: version,
     importedXml: { root: root.name, namespace: getAttr(root, ["xmlns"]), attributes: { ...(root.attrs || {}) } },
   };
+  const rootExtension = firstChild(root, ["extensions"]);
+  if (rootExtension) {
+    try {
+      const parsedExtension = JSON.parse(textOf(rootExtension));
+      if (isRecord(parsedExtension)) document.extensions = { ...document.extensions, ...parsedExtension };
+    } catch {
+      warnings.push("an ArchInt extension on the XML root could not be decoded");
+    }
+  }
   const modelElements = {};
   const rawElementIds = new Map();
   const elementNodes = collectionItems(root, ["elements", "modelelements"], ["element", "modelelement", "concept"]);
@@ -592,6 +602,22 @@ function parseOpenGroupExchange(source, filename, root, version) {
     view.height = viewHeight && viewHeight > 0 ? viewHeight : Math.max(900, maxY + 80);
     const background = getAttr(sourceView, ["background", "backgroundColor"]);
     if (background) view.background = colorValue(background, view.background);
+    const annotationsNode = firstChild(sourceView, ["annotations"]);
+    if (annotationsNode) {
+      try {
+        const parsedAnnotations = JSON.parse(textOf(annotationsNode));
+        if (Array.isArray(parsedAnnotations)) {
+          for (const annotation of parsedAnnotations) {
+            if (isRecord(annotation) && typeof annotation.id === "string" && annotation.type === "legacy-drawing-element" && isRecord(annotation.element)) {
+              view.annotations[annotation.id] = annotation;
+              view.order.push(annotation.id);
+            }
+          }
+        }
+      } catch {
+        warnings.push(`annotations in view ${view.id} could not be decoded`);
+      }
+    }
     parsedViews.push(view);
   }
   if (!parsedViews.length) {
@@ -619,7 +645,16 @@ function parseOpenGroupExchange(source, filename, root, version) {
     document.views = parsedViews;
   }
   const organization = descendants(root, ["organizations", "organization"], [])[0];
-  if (organization) document.model.organization = descendants(organization, ["item", "folder", "group"], []).map((item) => ({
+  const organizationJson = organization && firstChild(organization, ["json"]);
+  if (organizationJson) {
+    try {
+      const parsedOrganization = JSON.parse(textOf(organizationJson));
+      if (Array.isArray(parsedOrganization)) document.model.organization = parsedOrganization;
+    } catch {
+      warnings.push("the organization extension could not be decoded");
+    }
+  }
+  if (organization && !organizationJson) document.model.organization = descendants(organization, ["item", "folder", "group"], []).map((item) => ({
     id: getAttr(item, ["identifier", "id"]),
     elementId: getAttr(item, ["elementRef", "elementRefId", "ref"]),
     name: valueOf(item, ["name", "label"], ["name", "label"]),
@@ -765,7 +800,12 @@ function serializeArchimateFile(input, options = {}) {
   if (format === "open-group-exchange" || format === "xml" || format === "archimate") {
     try {
       const result = serializeOpenGroupExchange(document, options);
-      return { ...result, format: "open-group-exchange", extension: ".xml", errors: [] };
+      const structural = validateOpenGroupExchangeXml(result.content);
+      if (!structural.valid) return { content: "", format: "open-group-exchange", extension: ".xml", warnings: result.warnings, errors: structural.errors };
+      const reopened = parseArchimateFile(result.content, "exported.xml");
+      return reopened.errors.length === 0
+        ? { ...result, format: "open-group-exchange", extension: ".xml", errors: [] }
+        : { content: "", format: "open-group-exchange", extension: ".xml", warnings: result.warnings, errors: reopened.errors };
     } catch (error) {
       return { content: "", format: "open-group-exchange", extension: ".xml", warnings: [], errors: [error.message] };
     }
