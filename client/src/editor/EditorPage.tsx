@@ -1,6 +1,12 @@
-import type { PointerEventHandler, RefObject } from "react";
+import { useState, type PointerEventHandler, type RefObject } from "react";
 import { Diagram, type Drawing, type Element, type Kind } from "../diagram";
 import type { SnapGuide } from "./geometry";
+import {
+  ARCHIMATE_CATALOG,
+  isArchimateElementType,
+  type ArchimateElementType,
+  type ArchimateRelationshipType,
+} from "../model/archimate";
 
 type Tool = Kind | "select" | "eraser";
 type Alignment =
@@ -82,6 +88,16 @@ type EditorPageProps = {
   onDistribute: (distribution: Distribution) => void;
   onRemove: () => void;
   onSelect: (id: string | null, additive?: boolean) => void;
+  viewId: string;
+  viewSummaries: { id: string; name: string; width: number; height: number }[];
+  onViewChange: (id: string) => void;
+  onCreateView: () => void;
+  onRenameView: () => void;
+  onRemoveView: () => void;
+  onAddSemantic: (type: ArchimateElementType) => void;
+  onPlaceModelElement: (id: string) => void;
+  onAssignElementType: (type: ArchimateElementType) => void;
+  onAssignRelationshipType: (type: ArchimateRelationshipType) => void;
 };
 
 export function EditorPage({
@@ -130,7 +146,19 @@ export function EditorPage({
   onDistribute,
   onRemove,
   onSelect,
+  viewId,
+  viewSummaries,
+  onViewChange,
+  onCreateView,
+  onRenameView,
+  onRemoveView,
+  onAddSemantic,
+  onPlaceModelElement,
+  onAssignElementType,
+  onAssignRelationshipType,
 }: EditorPageProps) {
+  const [paletteSearch, setPaletteSearch] = useState("");
+  const activeView = drawing.document?.views.find((view) => view.id === viewId);
   const hasGroup = selectedIds.some(
     (id) => drawing.elements.find((candidate) => candidate.id === id)?.groupId,
   );
@@ -144,6 +172,30 @@ export function EditorPage({
         <button onClick={onBack}>← All drawings</button>
         <div className="row">
           <span className="document-tag">{drawing.category}</span>
+          <label className="view-selector">
+            <span className="sr-only">Current view</span>
+            <select value={viewId} onChange={(event) => onViewChange(event.target.value)}>
+              {viewSummaries.map((view) => (
+                <option key={view.id} value={view.id}>
+                  {view.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button className="compact-action" onClick={onCreateView} title="Create view">
+            + View
+          </button>
+          <button className="compact-action" onClick={onRenameView} title="Rename view">
+            Rename
+          </button>
+          <button
+            className="compact-action"
+            onClick={onRemoveView}
+            disabled={viewSummaries.length <= 1}
+            title="Remove current view"
+          >
+            Remove
+          </button>
           <span className="muted">
             {selectedIds.length > 1
               ? `${selectedIds.length} selected · `
@@ -199,6 +251,64 @@ export function EditorPage({
               </button>
             ))}
           </div>
+          <div className="panel-section semantic-palette">
+            <div className="row between">
+              <span className="eyebrow">ARCHIMATE 4.0</span>
+              <span className="muted">{ARCHIMATE_CATALOG.elements.length}</span>
+            </div>
+            <input
+              aria-label="Search ArchiMate palette"
+              placeholder="Search concepts…"
+              value={paletteSearch}
+              onChange={(event) => setPaletteSearch(event.target.value)}
+            />
+            <div className="semantic-palette-list">
+              {ARCHIMATE_CATALOG.domains.map((domain) => {
+                const items = ARCHIMATE_CATALOG.elements.filter(
+                  (candidate) =>
+                    candidate.domain === domain.id &&
+                    `${candidate.name} ${candidate.description}`
+                      .toLowerCase()
+                      .includes(paletteSearch.toLowerCase()),
+                );
+                if (!items.length) return null;
+                return (
+                  <div key={domain.id} className="semantic-domain">
+                    <span>{domain.name}</span>
+                    {items.map((candidate) => (
+                      <button
+                        key={candidate.id}
+                        type="button"
+                        title={candidate.description}
+                        onClick={() => onAddSemantic(candidate.id as ArchimateElementType)}
+                      >
+                        <span className="semantic-glyph" aria-hidden="true">
+                          {candidate.name.slice(0, 1)}
+                        </span>
+                        {candidate.name}
+                      </button>
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
+            {drawing.document && Object.keys(drawing.document.model.elements).length > 0 && (
+              <div className="semantic-domain existing-models">
+                <span>Existing model elements</span>
+                {Object.values(drawing.document.model.elements).map((candidate) => (
+                  <button
+                    key={candidate.id}
+                    type="button"
+                    title="Place another occurrence in this view"
+                    onClick={() => onPlaceModelElement(candidate.id)}
+                  >
+                    <span className="semantic-glyph" aria-hidden="true">↗</span>
+                    {candidate.name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <div className="panel-section">
             <span className="eyebrow">QUICK GUIDE</span>
             <p>Click an object to select it. Shift-click or drag an empty area to select several.</p>
@@ -229,8 +339,8 @@ export function EditorPage({
             <div
               className="paper"
               style={{
-                width: (1400 * zoom) / 100,
-                height: (900 * zoom) / 100,
+                width: ((activeView?.width || 1400) * zoom) / 100,
+                height: ((activeView?.height || 900) * zoom) / 100,
               }}
             >
               <Diagram
@@ -244,6 +354,11 @@ export function EditorPage({
                 onPointerDown={onPointerDown}
                 onPointerMove={onPointerMove}
                 onPointerUp={onPointerUp}
+                page={{
+                  width: activeView?.width || 1400,
+                  height: activeView?.height || 900,
+                  background: activeView?.background || "#ffffff",
+                }}
               />
             </div>
           </div>
@@ -284,6 +399,11 @@ export function EditorPage({
             <>
               <div className="selected-type">
                 {symbols[element.kind]} <strong>{element.kind}</strong>
+                {element.archimateType && (
+                  <span className="semantic-badge">
+                    {ARCHIMATE_CATALOG.elements.find((candidate) => candidate.id === element.archimateType)?.name || element.archimateType}
+                  </span>
+                )}
                 {isLocked && <span title="Locked">🔒</span>}
                 {isHidden && <span title="Hidden">◌</span>}
                 <span className="status-dot" />
@@ -298,6 +418,31 @@ export function EditorPage({
                   onBlur={onFinishTextEdit}
                 />
               </label>
+              {element.kind !== "arrow" && element.kind !== "pen" && (
+                <label>
+                  ArchiMate 4.0 type
+                  <select
+                    disabled={isLocked}
+                    value={element.archimateType || ""}
+                    onChange={(event) => {
+                      if (isArchimateElementType(event.target.value)) onAssignElementType(event.target.value);
+                    }}
+                  >
+                    <option value="">Generic annotation</option>
+                    {ARCHIMATE_CATALOG.domains.map((domain) => (
+                      <optgroup key={domain.id} label={domain.name}>
+                        {ARCHIMATE_CATALOG.elements
+                          .filter((candidate) => candidate.domain === domain.id)
+                          .map((candidate) => (
+                            <option key={candidate.id} value={candidate.id}>
+                              {candidate.name}
+                            </option>
+                          ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                </label>
+              )}
               {element.kind !== "arrow" && element.kind !== "pen" && (
                 <label>
                   Vector icon
@@ -329,6 +474,82 @@ export function EditorPage({
               {element.kind === "arrow" && (
                 <div className="connector-controls">
                   <span className="eyebrow">CONNECTOR</span>
+                  <label>
+                    ArchiMate relationship
+                    <select
+                      disabled={isLocked}
+                      value={element.relationshipType || ""}
+                      onChange={(event) => {
+                        if (event.target.value) onAssignRelationshipType(event.target.value as ArchimateRelationshipType);
+                      }}
+                    >
+                      <option value="">Generic connector</option>
+                      {ARCHIMATE_CATALOG.relationships.map((relationship) => (
+                        <option key={relationship.id} value={relationship.id}>
+                          {relationship.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {element.relationshipType === "Access" && (
+                    <label>
+                      Access type
+                      <select
+                        disabled={isLocked}
+                        value={element.accessType || "unspecified"}
+                        onChange={(event) =>
+                          onUpdate({
+                            accessType: event.target.value as Element["accessType"],
+                          })
+                        }
+                      >
+                        <option value="unspecified">Unspecified</option>
+                        <option value="read">Read</option>
+                        <option value="write">Write</option>
+                        <option value="read-write">Read / write</option>
+                      </select>
+                    </label>
+                  )}
+                  {element.relationshipType === "Influence" && (
+                    <label>
+                      Influence strength
+                      <select
+                        disabled={isLocked}
+                        value={element.influenceStrength || ""}
+                        onChange={(event) =>
+                          onUpdate({
+                            influenceStrength: event.target.value as Element["influenceStrength"],
+                          })
+                        }
+                      >
+                        <option value="">Unspecified</option>
+                        <option value="+">+</option>
+                        <option value="++">++</option>
+                        <option value="-">-</option>
+                        <option value="--">--</option>
+                      </select>
+                    </label>
+                  )}
+                  <div className="property-grid">
+                    <label>
+                      Source multiplicity
+                      <input
+                        placeholder="0..*"
+                        disabled={isLocked}
+                        value={element.sourceMultiplicity || ""}
+                        onChange={(event) => onUpdate({ sourceMultiplicity: event.target.value })}
+                      />
+                    </label>
+                    <label>
+                      Target multiplicity
+                      <input
+                        placeholder="1"
+                        disabled={isLocked}
+                        value={element.targetMultiplicity || ""}
+                        onChange={(event) => onUpdate({ targetMultiplicity: event.target.value })}
+                      />
+                    </label>
+                  </div>
                   <label>
                     Route
                     <select
@@ -385,6 +606,27 @@ export function EditorPage({
                     value={element.detail}
                     disabled={isLocked}
                     onChange={(e) => onUpdate({ detail: e.target.value }, false)}
+                    onBlur={onFinishTextEdit}
+                  />
+                </label>
+              )}
+              {element.archimateType && (
+                <label>
+                  Model properties
+                  <textarea
+                    value={Object.entries(element.semanticProperties || {})
+                      .map(([key, value]) => `${key}=${value}`)
+                      .join("\n")}
+                    disabled={isLocked}
+                    placeholder="owner=Architecture team"
+                    onChange={(event) => {
+                      const properties: Record<string, string> = {};
+                      for (const line of event.target.value.split(/\r?\n/)) {
+                        const separator = line.indexOf("=");
+                        if (separator > 0) properties[line.slice(0, separator).trim()] = line.slice(separator + 1).trim();
+                      }
+                      onUpdate({ semanticProperties: properties }, false);
+                    }}
                     onBlur={onFinishTextEdit}
                   />
                 </label>

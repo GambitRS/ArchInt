@@ -38,6 +38,19 @@ import {
   type Element,
   type Kind,
 } from "./diagram";
+import {
+  ARCHIMATE_CATALOG,
+  applyLegacyElements,
+  createView,
+  defaultStyle,
+  ensureCanonicalDocument,
+  flattenDocument,
+  isArchimateElementType,
+  relationshipAllowed,
+  type ArchimateDocument,
+  type ArchimateElementType,
+  type ArchimateRelationshipType,
+} from "./model/archimate";
 type Tool = Kind | "select" | "eraser";
 type Alignment =
   | "left"
@@ -62,6 +75,7 @@ export default function App() {
   const [reauthError, setReauthError] = useState("");
   const [drawings, setDrawings] = useState<Drawing[]>([]);
   const [current, setCurrent] = useState("");
+  const [viewId, setViewId] = useState("");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [tool, setTool] = useState<Tool>("select");
   const [search, setSearch] = useState("");
@@ -140,12 +154,36 @@ export default function App() {
     selectedIds.length === 1
       ? drawing?.elements.find((e) => e.id === selectedIds[0])
       : undefined;
+  function canonicalForDrawing(d: Drawing): ArchimateDocument {
+    return ensureCanonicalDocument(d.document || d.elements, { name: d.name });
+  }
+
+  function drawingWithActiveView(d: Drawing, document = canonicalForDrawing(d), nextViewId?: string): Drawing {
+    const active = nextViewId || d.activeViewId || document.activeViewId || document.views[0]?.id;
+    if (active && document.views.some((view) => view.id === active)) document.activeViewId = active;
+    const activeView = document.views.find((view) => view.id === document.activeViewId) || document.views[0];
+    return {
+      ...d,
+      document,
+      activeViewId: activeView.id,
+      elements: flattenDocument(document, activeView.id),
+      viewSummaries: document.views.map((view) => ({
+        id: view.id,
+        name: view.name,
+        width: view.width,
+        height: view.height,
+      })),
+    };
+  }
+
   async function loadWorkspace(
     u: User,
     target: Screen = "library",
     isActive: () => boolean = () => true,
   ) {
-    const data = await api<Drawing[]>("/drawings");
+    const data = (await api<Drawing[]>("/drawings")).map((candidate) =>
+      drawingWithActiveView(candidate),
+    );
     if (!isActive()) return;
     const local = target === "editor" ? new Map(pending.current) : new Map();
     const serverIds = new Set(data.map((d) => d.id));
@@ -277,11 +315,14 @@ export default function App() {
             setDrawings((ds) =>
               ds.map((n) =>
                 n.id === id
-                  ? {
+                      ? {
                       ...n,
                       name: saved.name,
                       category: saved.category,
+                      document: saved.document,
                       elements: saved.elements,
+                      activeViewId: saved.activeViewId,
+                      viewSummaries: saved.viewSummaries,
                       updated: saved.updated,
                       revision: saved.revision,
                     }
@@ -312,8 +353,23 @@ export default function App() {
     }
   }
   function commit(d: Drawing) {
-    setDrawings((ds) => ds.map((n) => (n.id === d.id ? d : n)));
-    pending.current.set(d.id, d);
+    let document = canonicalForDrawing(d);
+    const active = d.activeViewId || viewId || document.activeViewId;
+    if (active && document.views.some((view) => view.id === active)) {
+      document.activeViewId = active;
+    }
+    const before = flattenDocument(document, document.activeViewId);
+    if (JSON.stringify(before) !== JSON.stringify(d.elements)) {
+      document = applyLegacyElements(document, d.elements, document.activeViewId);
+      document.activeViewId = active;
+    }
+    const next = drawingWithActiveView(
+      { ...d, document, activeViewId: document.activeViewId },
+      document,
+      document.activeViewId,
+    );
+    setDrawings((ds) => ds.map((n) => (n.id === next.id ? next : n)));
+    pending.current.set(next.id, next);
     setStatus("Unsaved changes");
     if (saveIssue?.kind === "network" || saveIssue?.kind === "error") {
       setSaveIssue(null);
@@ -323,7 +379,7 @@ export default function App() {
     if (user && screen === "editor") {
       if (recoveryTimer.current) clearTimeout(recoveryTimer.current);
       recoveryTimer.current = setTimeout(() => {
-        const latest = pending.current.get(d.id);
+        const latest = pending.current.get(next.id);
         if (latest) writeRecoveryDraft(latest);
       }, 800);
     }
@@ -606,6 +662,24 @@ export default function App() {
         (groupId) => [groupId, `group-${crypto.randomUUID()}`],
       ),
     );
+    const modelMap = new Map(
+      [
+        ...new Set(
+          source
+            .filter((candidate) => candidate.archimateType && candidate.modelElementId)
+            .map((candidate) => candidate.modelElementId!),
+        ),
+      ].map((modelId) => [modelId, `model-${crypto.randomUUID()}`]),
+    );
+    const relationshipMap = new Map(
+      [
+        ...new Set(
+          source
+            .filter((candidate) => candidate.relationshipType && candidate.relationshipId)
+            .map((candidate) => candidate.relationshipId!),
+        ),
+      ].map((relationshipId) => [relationshipId, `relationship-${crypto.randomUUID()}`]),
+    );
     const remapAnchor = (anchor: Element["sourceAnchor"]) => {
       if (!anchor) return undefined;
       const elementId = idMap.get(anchor.elementId);
@@ -620,6 +694,12 @@ export default function App() {
       parentId: candidate.parentId ? idMap.get(candidate.parentId) : undefined,
       sourceAnchor: remapAnchor(candidate.sourceAnchor),
       targetAnchor: remapAnchor(candidate.targetAnchor),
+      modelElementId: candidate.modelElementId
+        ? modelMap.get(candidate.modelElementId) || `model-${crypto.randomUUID()}`
+        : undefined,
+      relationshipId: candidate.relationshipId
+        ? relationshipMap.get(candidate.relationshipId) || `relationship-${crypto.randomUUID()}`
+        : undefined,
       locked: false,
       hidden: false,
     }));
@@ -809,6 +889,11 @@ export default function App() {
     };
   }, [screen]);
   function open(d: Drawing) {
+    const document = canonicalForDrawing(d);
+    const active = d.activeViewId || document.activeViewId || document.views[0].id;
+    const normalized = drawingWithActiveView({ ...d, document }, document, active);
+    setDrawings((ds) => ds.map((candidate) => (candidate.id === d.id ? normalized : candidate)));
+    setViewId(active);
     const candidate = readRecoveryDraft(d);
     setRecoveryDraft(
       candidate && Date.parse(candidate.updated) > Date.parse(d.updated)
@@ -967,6 +1052,7 @@ export default function App() {
       setDrawings([]);
       setScreen("login");
       setCurrent("");
+      setViewId("");
       setSelectedIds([]);
       editBaseline.current = null;
       setSaveIssue(null);
@@ -1574,6 +1660,162 @@ export default function App() {
       ),
     );
   }
+  function addSemanticElement(type: ArchimateElementType) {
+    if (!drawing || !isArchimateElementType(type)) return;
+    const definition = ARCHIMATE_CATALOG.elements.find((candidate) => candidate.id === type);
+    if (!definition) return;
+    const style = defaultStyle(type);
+    const index = drawing.elements.filter((candidate) => candidate.archimateType).length;
+    const kind: Kind = ["Event", "AndJunction", "OrJunction"].includes(type)
+      ? "ellipse"
+      : ["Grouping", "Location", "Product", "Plateau"].includes(type)
+        ? "container"
+        : "card";
+    const semantic: Element = {
+      id: `occurrence-${crypto.randomUUID()}`,
+      kind,
+      x: 100 + (index % 4) * 250,
+      y: 120 + Math.floor(index / 4) * 130,
+      w: kind === "ellipse" ? 150 : 210,
+      h: kind === "ellipse" ? 100 : 86,
+      text: definition.name,
+      detail: "",
+      fill: style.fill || "#edf3fc",
+      stroke: style.stroke || "#7392b8",
+      fontSize: style.fontSize || 16,
+      strokeWidth: style.strokeWidth,
+      fontWeight: style.fontWeight,
+      lineHeight: style.lineHeight,
+      textAlign: style.textAlign,
+      wrap: style.wrap,
+      overflow: style.overflow,
+      archimateType: type,
+      modelElementId: `model-${crypto.randomUUID()}`,
+    };
+    replace([...drawing.elements, semantic]);
+    setSelectedIds([semantic.id]);
+  }
+  function placeExistingModel(modelId: string) {
+    if (!drawing || !drawing.document) return;
+    const model = drawing.document.model.elements[modelId];
+    if (!model || !isArchimateElementType(model.type)) return;
+    const style = defaultStyle(model.type);
+    const index = drawing.elements.length;
+    const occurrence: Element = {
+      id: `occurrence-${crypto.randomUUID()}`,
+      kind: "card",
+      x: 120 + (index % 4) * 250,
+      y: 120 + Math.floor(index / 4) * 130,
+      w: 210,
+      h: 86,
+      text: model.name,
+      detail: model.documentation,
+      fill: style.fill || "#edf3fc",
+      stroke: style.stroke || "#7392b8",
+      fontSize: style.fontSize || 16,
+      archimateType: model.type,
+      modelElementId: model.id,
+    };
+    replace([...drawing.elements, occurrence]);
+    setSelectedIds([occurrence.id]);
+  }
+  function assignElementType(type: ArchimateElementType) {
+    if (!drawing || !selectedIds.length || !isArchimateElementType(type)) return;
+    const selected = new Set(selectedIds);
+    const next = drawing.elements.map((candidate) => {
+      if (!selected.has(candidate.id) || candidate.kind === "arrow" || candidate.kind === "pen") return candidate;
+      const style = defaultStyle(type);
+      return {
+        ...candidate,
+        kind: candidate.kind === "icon" ? "card" : candidate.kind,
+        archimateType: type,
+        modelElementId: candidate.modelElementId || `model-${crypto.randomUUID()}`,
+        fill: candidate.fill || style.fill || "#edf3fc",
+        stroke: candidate.stroke || style.stroke || "#7392b8",
+      };
+    });
+    replace(next);
+  }
+  function assignRelationshipType(type: ArchimateRelationshipType) {
+    if (!drawing || !selectedIds.length) return;
+    const selected = new Set(selectedIds);
+    const candidate = drawing.elements.find((item) => selected.has(item.id) && item.kind === "arrow");
+    if (!candidate) return;
+    const source = drawing.elements.find((item) => item.id === candidate.sourceAnchor?.elementId);
+    const target = drawing.elements.find((item) => item.id === candidate.targetAnchor?.elementId);
+    if (!source?.archimateType || !target?.archimateType || !relationshipAllowed(source.archimateType, type, target.archimateType)) {
+      setError("That relationship is not valid for the selected endpoints. Type both endpoint elements first.");
+      return;
+    }
+    replace(
+      drawing.elements.map((item) =>
+        item.id === candidate.id
+          ? {
+              ...item,
+              relationshipType: type,
+              relationshipId: item.relationshipId || `relationship-${crypto.randomUUID()}`,
+            }
+          : item,
+      ),
+    );
+    setError("");
+  }
+  function selectView(nextViewId: string) {
+    if (!drawing || !drawing.document || !drawing.document.views.some((view) => view.id === nextViewId)) return;
+    finishTextEdit();
+    const document = structuredClone(drawing.document);
+    document.activeViewId = nextViewId;
+    setViewId(nextViewId);
+    const next = drawingWithActiveView({ ...drawing, document, activeViewId: nextViewId }, document, nextViewId);
+    commit(next);
+    setSelectedIds([]);
+    setHistory([]);
+    setFuture([]);
+  }
+  function createViewCommand() {
+    if (!drawing || !drawing.document) return;
+    const name = window.prompt("Name this view", `View ${drawing.document.views.length + 1}`)?.trim();
+    if (!name) return;
+    const document = structuredClone(drawing.document);
+    const view = createView(name, {
+      width: document.page.width,
+      height: document.page.height,
+      background: document.page.background,
+    });
+    document.views.push(view);
+    document.activeViewId = view.id;
+    setViewId(view.id);
+    commit(drawingWithActiveView({ ...drawing, document, activeViewId: view.id }, document, view.id));
+    setSelectedIds([]);
+    setHistory([]);
+    setFuture([]);
+  }
+  function renameViewCommand() {
+    if (!drawing?.document) return;
+    const view = drawing.document.views.find((candidate) => candidate.id === (drawing.activeViewId || viewId));
+    if (!view) return;
+    const name = window.prompt("Rename view", view.name)?.trim();
+    if (!name || name === view.name) return;
+    const document = structuredClone(drawing.document);
+    const target = document.views.find((candidate) => candidate.id === view.id);
+    if (target) target.name = name.slice(0, 100);
+    commit({ ...drawing, document, activeViewId: view.id, elements: flattenDocument(document, view.id) });
+  }
+  function removeViewCommand() {
+    if (!drawing?.document || drawing.document.views.length <= 1) return;
+    const active = drawing.activeViewId || viewId || drawing.document.activeViewId;
+    const target = drawing.document.views.find((candidate) => candidate.id === active);
+    if (!target || !window.confirm(`Remove the “${target.name}” view? Model elements will remain available.`)) return;
+    const document = structuredClone(drawing.document);
+    document.views = document.views.filter((candidate) => candidate.id !== target.id);
+    const next = document.views[0];
+    document.activeViewId = next.id;
+    setViewId(next.id);
+    commit(drawingWithActiveView({ ...drawing, document, activeViewId: next.id }, document, next.id));
+    setSelectedIds([]);
+    setHistory([]);
+    setFuture([]);
+  }
   function sendToBack() {
     reorderSelection("back");
   }
@@ -1970,6 +2212,24 @@ export default function App() {
             onDistribute={distributeSelection}
             onRemove={remove}
             onSelect={selectTarget}
+            viewId={viewId || drawing.activeViewId || drawing.document?.activeViewId || ""}
+            viewSummaries={
+              drawing.viewSummaries ||
+              drawing.document?.views.map((view) => ({
+                id: view.id,
+                name: view.name,
+                width: view.width,
+                height: view.height,
+              })) || []
+            }
+            onViewChange={selectView}
+            onCreateView={createViewCommand}
+            onRenameView={renameViewCommand}
+            onRemoveView={removeViewCommand}
+            onAddSemantic={addSemanticElement}
+            onPlaceModelElement={placeExistingModel}
+            onAssignElementType={assignElementType}
+            onAssignRelationshipType={assignRelationshipType}
           />
         )
       )}

@@ -11,6 +11,7 @@ import type {
   ArchimateElementType,
   ArchimateRelationshipType,
 } from "./model/archimate";
+import { ARCHIMATE_CATALOG } from "./model/archimate";
 export type Kind =
   | "card"
   | "container"
@@ -408,12 +409,100 @@ function textAnchor(align: TextAlign): "start" | "middle" | "end" {
 
 function textPosition(element: Element, align: TextAlign, padding = 18) {
   if (align === "center") return element.w / 2;
-  const iconPadding = element.iconName ? 38 : 0;
+  const iconPadding = element.iconName || element.archimateType ? 42 : 0;
   return align === "right"
     ? element.w - padding
     : element.kind === "text"
       ? iconPadding
       : padding + iconPadding;
+}
+
+function ArchimateGlyph({
+  type,
+  x,
+  y,
+  w,
+  h,
+  color,
+  fill,
+}: {
+  type: ArchimateElementType;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  color: string;
+  fill: string;
+}) {
+  const definition = ARCHIMATE_CATALOG.elements.find((element) => element.id === type);
+  const shape = definition?.shape || "component";
+  const label = type === "ApplicationComponent"
+    ? "A"
+    : type === "BusinessActor"
+      ? "B"
+      : type === "TechnologyInterface"
+        ? "T"
+        : type === "ApplicationInterface"
+          ? "A"
+          : type === "BusinessInterface"
+            ? "B"
+            : type.slice(0, 1);
+  const line = {
+    fill: "none",
+    stroke: color,
+    strokeWidth: 5,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+  };
+  const soft = fill === "none" ? "none" : fill;
+  return (
+    <g
+      data-archimate-glyph={type}
+      transform={`translate(${x} ${y}) scale(${Math.max(0.2, w / 42)} ${Math.max(0.2, h / 42)})`}
+      aria-hidden="true"
+    >
+      <title>{definition?.name || type}</title>
+      {shape === "circle" || shape === "event" ? (
+        <circle cx="21" cy="21" r="15" {...line} fill={soft} />
+      ) : shape === "role" || shape === "actor" ? (
+        <>
+          <circle cx="21" cy="11" r="6" {...line} fill={soft} />
+          <path d="M9 37c1-9 6-14 12-14s11 5 12 14" {...line} />
+        </>
+      ) : shape === "document" ? (
+        <path d="M8 5h19l7 7v25H8Z M27 5v8h7" {...line} fill={soft} />
+      ) : shape === "network" || shape === "path" ? (
+        <>
+          <circle cx="9" cy="21" r="4" fill={soft} stroke={color} strokeWidth="4" />
+          <circle cx="33" cy="9" r="4" fill={soft} stroke={color} strokeWidth="4" />
+          <circle cx="33" cy="33" r="4" fill={soft} stroke={color} strokeWidth="4" />
+          <path d="M13 19 29 11M13 23l16 8" {...line} />
+        </>
+      ) : shape === "junction" ? (
+        <circle cx="21" cy="21" r="12" fill={soft} stroke={color} strokeWidth="5" />
+      ) : shape === "capability" || shape === "goal" || shape === "outcome" || shape === "assessment" ? (
+        <path d="M21 4 37 13v16L21 38 5 29V13Z" {...line} fill={soft} />
+      ) : shape === "location" || shape === "facility" ? (
+        <path d="M6 36V15L21 5l15 10v21Z M15 36V23h12v13" {...line} fill={soft} />
+      ) : shape === "product" || shape === "plateau" || shape === "grouping" ? (
+        <path d="M7 9h28v25H7Z M13 16h16M13 24h11" {...line} fill={soft} />
+      ) : shape === "resource" || shape === "material" ? (
+        <path d="m21 4 16 9-16 9L5 13Z M5 13v16l16 9 16-9V13" {...line} fill={soft} />
+      ) : shape === "interface" ? (
+        <path d="M11 5h20v32H11Z M16 13h10M16 21h10M16 29h6" {...line} fill={soft} />
+      ) : shape === "service" ? (
+        <path d="M7 21h28M11 13h20M11 29h20" {...line} />
+      ) : (
+        <>
+          <rect x="6" y="6" width="30" height="30" rx="5" {...line} fill={soft} />
+          <path d="M13 15h16M13 21h16M13 27h10" {...line} />
+        </>
+      )}
+      <text x="21" y="25" textAnchor="middle" fontSize="12" fontWeight="700" fill={color}>
+        {label}
+      </text>
+    </g>
+  );
 }
 
 function isHiddenByParent(element: Element, elements: Element[]): boolean {
@@ -567,6 +656,35 @@ function ConnectorArrowhead({
   );
 }
 
+function ConnectorEndpointDecoration({
+  relationshipType,
+  point,
+  previous,
+  color,
+  strokeWidth,
+}: {
+  relationshipType?: ArchimateRelationshipType;
+  point: { x: number; y: number };
+  previous: { x: number; y: number };
+  color: string;
+  strokeWidth: number;
+}) {
+  if (relationshipType !== "Composition" && relationshipType !== "Aggregation") return null;
+  const angle = (Math.atan2(point.y - previous.y, point.x - previous.x) * 180) / Math.PI;
+  const filled = relationshipType === "Composition";
+  return (
+    <path
+      d="M0 0 L-11 -7 L-18 0 L-11 7 Z"
+      fill={filled ? color : "white"}
+      stroke={color}
+      strokeWidth={strokeWidth}
+      strokeLinejoin="round"
+      transform={`translate(${point.x} ${point.y}) rotate(${angle})`}
+      aria-hidden="true"
+    />
+  );
+}
+
 export const Diagram = memo(function Diagram({
   elements,
   selectedIds = [],
@@ -578,6 +696,7 @@ export const Diagram = memo(function Diagram({
   onPointerDown,
   onPointerMove,
   onPointerUp,
+  page,
 }: {
   elements: Element[];
   selectedIds?: string[];
@@ -589,7 +708,11 @@ export const Diagram = memo(function Diagram({
   onPointerDown?: PointerEventHandler<SVGSVGElement>;
   onPointerMove?: PointerEventHandler<SVGSVGElement>;
   onPointerUp?: PointerEventHandler<SVGSVGElement>;
+  page?: { width: number; height: number; background: string };
 }) {
+  const pageWidth = page?.width || 1400;
+  const pageHeight = page?.height || 900;
+  const pageBackground = page?.background || "#ffffff";
   const visibleElements = elements.filter(
     (element) => !isHiddenByParent(element, elements),
   );
@@ -598,7 +721,7 @@ export const Diagram = memo(function Diagram({
   return (
     <svg
       ref={svgRef}
-      viewBox="0 0 1400 900"
+      viewBox={`0 0 ${pageWidth} ${pageHeight}`}
       width="100%"
       height="100%"
       role="img"
@@ -633,9 +756,9 @@ export const Diagram = memo(function Diagram({
       </defs>
       <rect
         data-page-background="true"
-        width="1400"
-        height="900"
-        fill="white"
+        width={pageWidth}
+        height={pageHeight}
+        fill={pageBackground}
       />
       <g data-connectors="true">
         {visibleElements
@@ -645,6 +768,12 @@ export const Diagram = memo(function Diagram({
             const path = pointsPath(points);
             const label = connectorLabelPoint(points);
             const strokeWidth = e.strokeWidth ?? 2.5;
+            const relationshipDefinition = e.relationshipType
+              ? ARCHIMATE_CATALOG.relationships.find(
+                  (relationship) => relationship.id === e.relationshipType,
+                )
+              : undefined;
+            const dash = relationshipDefinition?.line === "dashed" ? "8 5" : undefined;
             const labelLines = e.text.split(/\r?\n/);
             const labelWidth = Math.max(
               28,
@@ -674,8 +803,18 @@ export const Diagram = memo(function Diagram({
                   strokeWidth={strokeWidth}
                   strokeLinecap="round"
                   strokeLinejoin="round"
+                  strokeDasharray={dash}
                   data-connector-path="true"
                 />
+                {relationshipDefinition && points.length > 1 && (
+                  <ConnectorEndpointDecoration
+                    relationshipType={e.relationshipType}
+                    point={points[0]}
+                    previous={points[1]}
+                    color={e.stroke}
+                    strokeWidth={strokeWidth}
+                  />
+                )}
                 <ConnectorArrowhead
                   arrowhead={e.arrowhead || "open"}
                   points={points}
@@ -706,6 +845,23 @@ export const Diagram = memo(function Diagram({
                         </tspan>
                       ))}
                     </text>
+                  </g>
+                )}
+                {(e.sourceMultiplicity || e.targetMultiplicity) && points.length > 1 && (
+                  <g aria-hidden="true" fill="#355348" fontSize="11" fontWeight="600">
+                    {e.sourceMultiplicity && (
+                      <text x={points[0].x + 8} y={points[0].y - 8}>
+                        {e.sourceMultiplicity}
+                      </text>
+                    )}
+                    {e.targetMultiplicity && (
+                      <text
+                        x={points[points.length - 1].x + 8}
+                        y={points[points.length - 1].y - 8}
+                      >
+                        {e.targetMultiplicity}
+                      </text>
+                    )}
                   </g>
                 )}
                 {selectedIds.length === 1 && selected.has(e.id) && (
@@ -815,6 +971,17 @@ export const Diagram = memo(function Diagram({
               y={0}
               w={e.w}
               h={e.h}
+              color={e.stroke}
+              fill={e.fill}
+            />
+          )}
+          {e.archimateType && e.kind !== "pen" && e.kind !== "icon" && (
+            <ArchimateGlyph
+              type={e.archimateType}
+              x={e.kind === "text" ? 0 : 12}
+              y={e.kind === "text" ? 0 : Math.max(8, e.h / 2 - 21)}
+              w={34}
+              h={34}
               color={e.stroke}
               fill={e.fill}
             />
@@ -998,7 +1165,7 @@ export const Diagram = memo(function Diagram({
             x1={guide.position}
             y1="0"
             x2={guide.position}
-            y2="900"
+            y2={pageHeight}
             stroke="#d38b4d"
             strokeDasharray="4 4"
             pointerEvents="none"
@@ -1010,7 +1177,7 @@ export const Diagram = memo(function Diagram({
             aria-hidden="true"
             x1="0"
             y1={guide.position}
-            x2="1400"
+            x2={pageWidth}
             y2={guide.position}
             stroke="#d38b4d"
             strokeDasharray="4 4"

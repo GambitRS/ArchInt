@@ -1,5 +1,5 @@
 import catalogJson from "../../../shared/archimate-catalog.json";
-import type { Element as LegacyElement } from "../diagram";
+import type { AnchorSide, Element as LegacyElement } from "../diagram";
 
 export const ARCHIMATE_VERSION = "4.0" as const;
 export const DOCUMENT_APP = "ArchInt" as const;
@@ -117,8 +117,8 @@ export type ViewConnection = {
   y: number;
   w: number;
   h: number;
-  source: { nodeId: string; side: LegacyElement["sourceAnchor"] extends infer A ? A extends { side: infer S } ? S : never : never; offset: number } | { x: number; y: number };
-  target: { nodeId: string; side: LegacyElement["targetAnchor"] extends infer A ? A extends { side: infer S } ? S : never : never; offset: number } | { x: number; y: number };
+  source: { nodeId: string; side: AnchorSide; offset: number } | { x: number; y: number };
+  target: { nodeId: string; side: AnchorSide; offset: number } | { x: number; y: number };
   route: "straight" | "orthogonal";
   waypoints: { x: number; y: number }[];
   label: string;
@@ -243,7 +243,7 @@ function styleFor(element: LegacyElement): Partial<LegacyElement> {
   };
 }
 
-function defaultStyle(type: ArchimateElementType): Partial<LegacyElement> {
+export function defaultStyle(type: ArchimateElementType): Partial<LegacyElement> {
   const domain = ARCHIMATE_CATALOG.elements.find((element) => element.id === type)?.domain;
   const fills: Record<string, string> = {
     common: "#edf3fc",
@@ -292,6 +292,10 @@ function makeView(name = "Main view", options: Partial<ArchimateView> = {}): Arc
     order: [],
     settings: isRecord(options.settings) ? clone(options.settings) : {},
   };
+}
+
+export function createView(name = "Main view", options: Partial<ArchimateView> = {}): ArchimateView {
+  return makeView(name, options);
 }
 
 export function createDocument(name = "Untitled drawing", options: Partial<ArchimateView> & { documentation?: string; properties?: PropertyMap } = {}): ArchimateDocument {
