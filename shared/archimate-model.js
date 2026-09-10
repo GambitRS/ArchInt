@@ -833,7 +833,7 @@ function validateCanonicalDocument(document) {
     }
     for (const [connectionId, connection] of Object.entries(view.connections)) {
       const relationship = document.model.relationships[connection?.relationshipId];
-      if (connectionId !== connection?.id || !itemIds.has(connectionId) && false || !relationIds.has(connection?.relationshipId) || !relationship || !finite(connection.x) || !finite(connection.y) || !finite(connection.w) || !finite(connection.h) || !ROUTES.includes(connection.route) || !validWaypoints(connection.waypoints) || !validMultiplicity(connection.sourceMultiplicity) || !validMultiplicity(connection.targetMultiplicity)) {
+      if (connectionId !== connection?.id || itemIds.has(connectionId) || !relationIds.has(connection?.relationshipId) || !relationship || !finite(connection.x) || !finite(connection.y) || !finite(connection.w) || !finite(connection.h) || !ROUTES.includes(connection.route) || !validWaypoints(connection.waypoints) || !validMultiplicity(connection.sourceMultiplicity) || !validMultiplicity(connection.targetMultiplicity)) {
         errors.push(`invalid view connection ${connectionId}`);
       }
       if (connection.source?.nodeId && !view.nodes[connection.source.nodeId]) errors.push(`invalid source node ${connectionId}`);
@@ -841,7 +841,7 @@ function validateCanonicalDocument(document) {
       itemIds.add(connectionId);
     }
     for (const [annotationId, annotation] of Object.entries(view.annotations)) {
-      if (annotationId !== annotation?.id || annotation.type !== "legacy-drawing-element" || !validLegacyElement(annotation.element, new Set(), { skipIds: true })) errors.push(`invalid view annotation ${annotationId}`);
+      if (annotationId !== annotation?.id || itemIds.has(annotationId) || annotation.type !== "legacy-drawing-element" || !validLegacyElement(annotation.element, new Set(), { skipIds: true })) errors.push(`invalid view annotation ${annotationId}`);
       itemIds.add(annotationId);
     }
     for (const item of view.order) if (typeof item !== "string" || !itemIds.has(item)) errors.push(`invalid view order in ${view.id}`);

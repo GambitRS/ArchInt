@@ -528,6 +528,7 @@ export function serializeOpenGroupExchange(documentInput: ArchimateDocument, lan
   const genericTypes = Object.values(document.model.elements).filter((element) => TYPES_TO_EXCHANGE[element.type]);
   if (genericTypes.length) warnings.push(`Generic ArchiMate 4.0 types use the closest ${languageVersion} exchange aliases: ${[...new Set(genericTypes.map((element) => element.type))].join(", ")}.`);
   if (Object.values(document.views).some((view) => Object.keys(view.annotations).length)) warnings.push("Generic annotations are retained in an ArchInt extension and may be ignored by other tools.");
+  if (document.views.some((view) => Object.values(view.nodes).some((node) => node.style?.iconName || node.points?.length || node.groupId))) warnings.push("Application-specific node styling is retained by the native .archimate file; an external exchange tool may ignore it.");
   const lines = [
     '<?xml version="1.0" encoding="UTF-8"?>',
     `<model${xmlAttrs({ xmlns: EXCHANGE_NAMESPACE, "xmlns:archimate": EXCHANGE_NAMESPACE, "xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance", "xmlns:archint": EXTENSION_NAMESPACE, version: languageVersion, "archint:sourceLanguageVersion": ARCHIMATE_VERSION })}>`,

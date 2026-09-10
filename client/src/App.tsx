@@ -190,6 +190,7 @@ export default function App() {
       ...d,
       document,
       activeViewId: activeView.id,
+      defaultView: activeView.name,
       elements: flattenDocument(document, activeView.id),
       viewSummaries: document.views.map((view) => ({
         id: view.id,
@@ -348,6 +349,7 @@ export default function App() {
                       document: saved.document,
                       elements: saved.elements,
                       activeViewId: saved.activeViewId,
+                      defaultView: saved.defaultView,
                       viewSummaries: saved.viewSummaries,
                       updated: saved.updated,
                       revision: saved.revision,
@@ -2160,6 +2162,12 @@ export default function App() {
                 onClick={() => setExportOpen(true)}
               >
                 Export ↗
+              </button>
+              <button
+                type="button"
+                onClick={() => void exportDrawing({ format: "archimate", bounds: "page", scale: 1, background: "white" })}
+              >
+                Save ArchiMate file
               </button>
               <button type="button" onClick={() => importInput.current?.click()}>
                 Open ArchiMate file

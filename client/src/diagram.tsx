@@ -99,6 +99,7 @@ export type Drawing = {
   /** Canonical ArchiMate document. `elements` remains a view compatibility projection. */
   document?: ArchimateDocument;
   activeViewId?: string;
+  defaultView?: string;
   viewSummaries?: { id: string; name: string; width: number; height: number }[];
 };
 export function makeExample(): Element[] {

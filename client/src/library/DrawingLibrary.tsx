@@ -157,7 +157,7 @@ export function DrawingLibrary({
                 <div className="row between">
                   <small>
                     {drawing.document
-                      ? `ArchiMate 4.0 · ${drawing.document.views.length} view${drawing.document.views.length === 1 ? "" : "s"}`
+                      ? `ArchiMate 4.0 · Default: ${drawing.defaultView || drawing.document.views.find((view) => view.id === drawing.document?.activeViewId)?.name || "Main view"} · ${drawing.document.views.length} view${drawing.document.views.length === 1 ? "" : "s"}`
                       : drawing.category}
                   </small>
                   <small>

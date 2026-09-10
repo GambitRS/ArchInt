@@ -78,15 +78,16 @@ export function parseDocumentJson(raw: string): ImportedDocument {
   if (!isRecord(value) || value.app !== DOCUMENT_APP) {
     throw new Error(`Unsupported document format. Expected ${DOCUMENT_APP} ArchiMate document.`);
   }
-  const isLegacy = value.schemaVersion === 1 && Array.isArray(value.elements);
+  const payload = isRecord(value.document) ? value.document : value;
+  const isLegacy = payload.schemaVersion === 1 && Array.isArray(payload.elements);
   const document = isLegacy
-    ? migrateLegacyDocument(value, {
+    ? migrateLegacyDocument(payload, {
         name:
           isRecord(value.drawing) && typeof value.drawing.name === "string"
             ? value.drawing.name
             : undefined,
       })
-    : ensureCanonicalDocument(value);
+    : ensureCanonicalDocument(payload);
   const result = validateDocument(document);
   if (!result.valid) throw new Error(result.errors.join("; "));
   const name =
