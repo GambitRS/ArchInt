@@ -53,6 +53,7 @@ import {
   flattenDocument,
   isArchimateElementType,
   relationshipAllowed,
+  validateDocument,
   type ArchimateDocument,
   type ArchimateElementType,
   type ArchimateRelationshipType,
@@ -300,7 +301,9 @@ export default function App() {
       ) {
         return null;
       }
-      return candidate;
+      const document = ensureCanonicalDocument(candidate.document || candidate.elements, { name: candidate.name });
+      if (!validateDocument(document).valid) return null;
+      return drawingWithActiveView({ ...candidate, document }, document, candidate.activeViewId || document.activeViewId);
     } catch {
       return null;
     }
@@ -1001,7 +1004,7 @@ export default function App() {
     setBusy(true);
     setError("");
     try {
-      const saved = await api<Drawing>(`/drawings/${id}`);
+      const saved = drawingWithActiveView(await api<Drawing>(`/drawings/${id}`));
       if (pending.current.get(id) !== draftAtStart) {
         setError("The local draft changed while the saved copy was loading.");
         return;
@@ -1014,6 +1017,7 @@ export default function App() {
       }
       revisions.current.set(id, saved.revision);
       setDrawings((ds) => ds.map((d) => (d.id === id ? saved : d)));
+      setViewId(saved.activeViewId || "");
       setHistory([]);
       setFuture([]);
       editBaseline.current = null;
@@ -2052,13 +2056,18 @@ export default function App() {
     setFuture([]);
     setSelectedIds([]);
     setRecoveryDraft(null);
-    commit({
+    const document = ensureCanonicalDocument(recoveryDraft.document || recoveryDraft.elements, { name: recoveryDraft.name });
+    const restored = drawingWithActiveView({
       ...drawing,
       name: recoveryDraft.name,
       category: recoveryDraft.category,
-      elements: recoveryDraft.elements,
+      document,
+      activeViewId: recoveryDraft.activeViewId || document.activeViewId,
+      elements: flattenDocument(document, recoveryDraft.activeViewId || document.activeViewId),
       updated: new Date().toISOString(),
-    });
+    }, document, recoveryDraft.activeViewId || document.activeViewId);
+    setViewId(restored.activeViewId || "");
+    commit(restored);
   }
   function discardRecovery() {
     if (!drawing) return;
